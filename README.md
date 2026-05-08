@@ -8,6 +8,17 @@ healthy (Phases 1–9); changing it via Ansible is unnecessarily risky. These
 roles cover only the OS-level prerequisites that need to be re-applied if a
 node is reimaged.
 
+**Live docs:** <https://andrelair-platform.github.io/minicloud-platform-docs/>
+— see [Phase 10 — Ansible](https://andrelair-platform.github.io/minicloud-platform-docs/platform-roadmap/phase-10-ansible) for the full
+walkthrough including the `--check --diff` drift audit and the rolling
+upgrade playbook.
+
+**Sibling repos in the [andrelair-platform](https://github.com/andrelair-platform) org:**
+[docs](https://github.com/andrelair-platform/minicloud-platform-docs) ·
+[opentofu](https://github.com/andrelair-platform/minicloud-opentofu) ·
+[gitops](https://github.com/andrelair-platform/minicloud-gitops) ·
+[platform-demo](https://github.com/andrelair-platform/platform-demo)
+
 ---
 
 ## Layout
