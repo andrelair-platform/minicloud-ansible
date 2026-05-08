@@ -1,0 +1,19 @@
+all:
+  vars:
+    ansible_user: ubuntu
+    ansible_python_interpreter: /usr/bin/python3
+  children:
+    control_plane:
+      hosts:
+        set-hog:
+          ansible_host: 10.0.0.2
+    workers:
+      hosts:
+        fast-skunk:
+          ansible_host: 10.0.0.4
+        fast-heron:
+          ansible_host: 10.0.0.7
+    cluster:
+      children:
+        control_plane:
+        workers:

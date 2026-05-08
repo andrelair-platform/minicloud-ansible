@@ -1,0 +1,77 @@
+---
+# Day-2 maintenance: rolling apt upgrade across the cluster.
+#
+# Runs one node at a time (`serial: 1`):
+#   1. cordon + drain the node from kubectl (running on the controller)
+#   2. apt update + apt upgrade
+#   3. reboot only if a kernel upgrade landed
+#   4. wait for the node to come back to Ready
+#   5. uncordon
+#
+# Pre-flight before running this for real:
+#   * Confirm every workload has >= 2 replicas spread across worker nodes
+#     (Phase 9's podinfo HPA min=2 + soft podAntiAffinity satisfies this).
+#   * Confirm Longhorn has >= 2 healthy replicas per volume — the drain
+#     will fail-safe if it can't relocate volumes.
+#   * Run with --check first to validate the playbook structure.
+#
+# Run for real:
+#   ansible-playbook playbooks/upgrade.yml
+#
+# Run against a single node only:
+#   ansible-playbook playbooks/upgrade.yml --limit fast-heron
+
+- name: Rolling apt upgrade across the cluster
+  hosts: cluster
+  serial: 1
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Cordon and drain the node from the controller
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        cmd: >
+          kubectl drain {{ inventory_hostname }}
+          --ignore-daemonsets
+          --delete-emptydir-data
+          --timeout=5m
+      changed_when: true
+
+  tasks:
+    - name: apt update
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
+
+    - name: apt upgrade (safe upgrade — never removes packages)
+      ansible.builtin.apt:
+        upgrade: safe
+      register: apt_upgrade_result
+
+    - name: Check whether a reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Reboot the node if required
+      ansible.builtin.reboot:
+        reboot_timeout: 600     # wait up to 10 min for node to come back
+        post_reboot_delay: 30   # let kubelet re-join after reboot
+      when: reboot_required.stat.exists
+
+    - name: Wait for kubelet to mark the node Ready
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        cmd: kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=5m
+      changed_when: false
+
+  post_tasks:
+    - name: Uncordon the node so workloads can be rescheduled here
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        cmd: kubectl uncordon {{ inventory_hostname }}
+      changed_when: true

@@ -1,0 +1,23 @@
+---
+# /etc/rancher/k3s/registries.yaml configures k3s' embedded containerd to
+# treat the local Harbor as a registry mirror. NOTE: there is a known
+# k3s/v2-suffix interaction that causes kubelet pulls from this Harbor URL
+# to fail until Phase 15 adds TLS — this role only preserves the current
+# state, it does not attempt to debug the pull path.
+- name: Ensure /etc/rancher/k3s directory exists
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Install /etc/rancher/k3s/registries.yaml
+  ansible.builtin.copy:
+    src: registries.yaml
+    dest: /etc/rancher/k3s/registries.yaml
+    owner: root
+    group: root
+    mode: "0644"
+  become: true

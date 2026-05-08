@@ -1,0 +1,11 @@
+---
+- name: Install /etc/netplan/99-default-gateway.yaml
+  ansible.builtin.copy:
+    src: 99-default-gateway.yaml
+    dest: /etc/netplan/99-default-gateway.yaml
+    owner: root
+    group: root
+    # netplan refuses world-readable files (since 24.04) — must be 0600
+    mode: "0600"
+  become: true
+  notify: Apply netplan

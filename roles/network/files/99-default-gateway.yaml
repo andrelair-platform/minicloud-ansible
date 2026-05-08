@@ -1,0 +1,7 @@
+network:
+  version: 2
+  ethernets:
+    enp0s31f6:
+      routes:
+        - to: default
+          via: 10.0.0.1

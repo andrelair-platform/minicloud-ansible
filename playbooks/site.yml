@@ -1,0 +1,9 @@
+---
+- name: Bootstrap minicloud cluster nodes (post-MAAS, pre-k3s)
+  hosts: cluster
+  gather_facts: true
+  roles:
+    - common
+    - longhorn-prereq
+    - k3s-registries
+    - network

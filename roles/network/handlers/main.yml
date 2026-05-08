@@ -1,0 +1,13 @@
+---
+# `netplan generate` validates the YAML and produces the systemd-networkd
+# config without applying it — a cheap safety check before `netplan apply`
+# tears down interfaces. If `generate` fails, `apply` will not be invoked
+# and the node keeps its current networking.
+- name: Apply netplan
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      netplan generate
+      netplan apply
+  become: true
+  changed_when: true

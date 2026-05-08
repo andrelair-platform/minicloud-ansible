@@ -1,0 +1,13 @@
+---
+- name: Install open-iscsi (provides iscsid + iscsi_tcp module)
+  ansible.builtin.apt:
+    name: open-iscsi
+    state: present
+  become: true
+
+- name: Ensure iscsid service is enabled and started
+  ansible.builtin.systemd:
+    name: iscsid
+    enabled: true
+    state: started
+  become: true
