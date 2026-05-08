@@ -7,3 +7,6 @@ common_packages:
   - net-tools
   - traceroute
   - rsync
+  # Phase 14 — sqlite3 is needed on set-hog for the online k3s state.db
+  # backup (`sqlite3 .backup`). Harmless on workers where it's unused.
+  - sqlite3
