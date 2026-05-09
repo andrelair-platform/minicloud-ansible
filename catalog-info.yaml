@@ -1,0 +1,32 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: minicloud-ansible
+  description: |
+    Phase 10 — Ansible playbooks for post-MAAS, pre-k3s node bootstrap.
+    4 roles: common (base utilities), longhorn-prereq (open-iscsi +
+    iscsid), k3s-registries (containerd mirror config + minicloud root
+    CA), network (default gateway via netplan). Plus a Day-2 rolling
+    apt-upgrade playbook with kubectl drain/uncordon. Idempotent against
+    the live 3-node cluster.
+  annotations:
+    backstage.io/source-location: url:https://github.com/andrelair-platform/minicloud-ansible
+    github.com/project-slug: andrelair-platform/minicloud-ansible
+  tags:
+    - ansible
+    - infrastructure
+    - configuration-management
+    - phase-10
+  links:
+    - url: https://andrelair-platform.github.io/minicloud-platform-docs/platform-roadmap/phase-10-ansible
+      title: Phase 10 documentation
+      icon: docs
+    - url: https://github.com/andrelair-platform/minicloud-ansible
+      title: Source code
+      icon: github
+spec:
+  type: tool
+  lifecycle: production
+  owner: andrelair-platform
+  system: minicloud-platform
