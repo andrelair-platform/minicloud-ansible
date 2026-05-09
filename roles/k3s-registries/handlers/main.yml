@@ -1,0 +1,11 @@
+---
+# k3s reads /etc/rancher/k3s/registries.yaml only at process startup, so
+# any change to that file (or the CA bundle it references) requires a
+# restart of the k3s process on each node:
+#   - control plane: `systemctl restart k3s`
+#   - workers:       `systemctl restart k3s-agent`
+- name: Restart k3s
+  ansible.builtin.systemd:
+    name: "{{ 'k3s' if 'control_plane' in group_names else 'k3s-agent' }}"
+    state: restarted
+  become: true

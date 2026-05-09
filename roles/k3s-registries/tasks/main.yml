@@ -1,9 +1,11 @@
 ---
 # /etc/rancher/k3s/registries.yaml configures k3s' embedded containerd to
-# treat the local Harbor as a registry mirror. NOTE: there is a known
-# k3s/v2-suffix interaction that causes kubelet pulls from this Harbor URL
-# to fail until Phase 15 adds TLS — this role only preserves the current
-# state, it does not attempt to debug the pull path.
+# treat the local Harbor as a registry mirror.
+#
+# Phase 15 (TLS) update: pull endpoint is now HTTPS, with our internal
+# root CA distributed to each node and referenced by tls.ca_file. This
+# resolves the Phase 7 "/v2-suffix containerd mismatch" issue — kubelet
+# can now pull from harbor.10.0.0.200.nip.io directly.
 - name: Ensure /etc/rancher/k3s directory exists
   ansible.builtin.file:
     path: /etc/rancher/k3s
@@ -13,6 +15,16 @@
     mode: "0755"
   become: true
 
+- name: Install minicloud root CA cert (consumed by registries.yaml)
+  ansible.builtin.copy:
+    src: minicloud-ca.crt
+    dest: /etc/rancher/k3s/minicloud-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Restart k3s
+
 - name: Install /etc/rancher/k3s/registries.yaml
   ansible.builtin.copy:
     src: registries.yaml
@@ -21,3 +33,4 @@
     group: root
     mode: "0644"
   become: true
+  notify: Restart k3s

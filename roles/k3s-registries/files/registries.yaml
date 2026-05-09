@@ -1,8 +1,8 @@
-configs:
-  "harbor.10.0.0.200.nip.io":
-    tls:
-      insecure_skip_verify: true
 mirrors:
   "harbor.10.0.0.200.nip.io":
     endpoint:
-      - "http://harbor.10.0.0.200.nip.io"
+      - "https://harbor.10.0.0.200.nip.io"
+configs:
+  "harbor.10.0.0.200.nip.io":
+    tls:
+      ca_file: /etc/rancher/k3s/minicloud-ca.crt
