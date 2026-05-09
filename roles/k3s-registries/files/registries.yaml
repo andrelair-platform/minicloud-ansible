@@ -1,7 +1,47 @@
+# /etc/rancher/k3s/registries.yaml — managed by Ansible (Phase 16).
+#
+# Architecture: Harbor (in-cluster) is the SINGLE chokepoint for every
+# image pull on the cluster. Each common upstream is mirrored through a
+# proxy-cache project in Harbor:
+#
+#   docker.io        → harbor.10.0.0.200.nip.io/v2/docker-hub/...
+#   ghcr.io          → harbor.10.0.0.200.nip.io/v2/ghcr/...
+#   quay.io          → harbor.10.0.0.200.nip.io/v2/quay/...
+#   registry.k8s.io  → harbor.10.0.0.200.nip.io/v2/k8s-registry/...
+#
+# Each mirror lists Harbor first AND the upstream as a fallback. If
+# Harbor is down (e.g., during a Harbor upgrade or pod restart), k3s
+# falls through to the public upstream. This avoids the "Harbor restart
+# breaks the cluster" trap.
+#
+# NB: do NOT proxy `goharbor/*` images. Harbor pulls its own images
+# directly via the upstream fallback path (or from each node's
+# containerd local cache from initial install). The mirror config below
+# only covers the four registries our workloads use.
+
 mirrors:
+  "docker.io":
+    endpoint:
+      - "https://harbor.10.0.0.200.nip.io/v2/docker-hub"
+      - "https://registry-1.docker.io"
+  "ghcr.io":
+    endpoint:
+      - "https://harbor.10.0.0.200.nip.io/v2/ghcr"
+      - "https://ghcr.io"
+  "quay.io":
+    endpoint:
+      - "https://harbor.10.0.0.200.nip.io/v2/quay"
+      - "https://quay.io"
+  "registry.k8s.io":
+    endpoint:
+      - "https://harbor.10.0.0.200.nip.io/v2/k8s-registry"
+      - "https://registry.k8s.io"
+  # Existing entry: pulls of harbor.10.0.0.200.nip.io/library/* still go
+  # to Harbor directly (no proxy redirection — these are our own images).
   "harbor.10.0.0.200.nip.io":
     endpoint:
       - "https://harbor.10.0.0.200.nip.io"
+
 configs:
   "harbor.10.0.0.200.nip.io":
     tls:
