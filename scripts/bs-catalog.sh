@@ -32,8 +32,11 @@
 #              (default: $HOME/minicloud-ca.crt)
 #              On the controller: /home/ktayl/minicloud-ca.crt
 #              On the Mac: scp the cert from the controller first
-
-set -euo pipefail
+#
+# Note: this script is designed to be sourced into ~/.bashrc, so it
+# deliberately does NOT use `set -euo pipefail` at the top level —
+# those options would pollute the caller's shell after sourcing.
+# Error handling lives inside the function (curl -sf and jq's strict mode).
 
 BS_HOST="${BS_HOST:-backstage.10.0.0.200.nip.io}"
 BS_CA="${BS_CA:-$HOME/minicloud-ca.crt}"

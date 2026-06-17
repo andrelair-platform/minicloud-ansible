@@ -7,6 +7,7 @@ Small standalone helpers that don't fit cleanly as Ansible roles or playbooks.
 | File | Purpose | When to use |
 |---|---|---|
 | `bs-catalog.sh` | Browse the Backstage service catalog via API | Workaround for the upstream off-the-shelf Backstage image's broken UI (notifications plugin `NotImplementedError` overlay). Use until the custom-image phase ships. |
+| `pin-audit.sh` | List every pod running an image with the `:latest` tag | Periodic hygiene check — drift detection. Empty output = cluster fully pinned (healthy). Non-empty = something silently regressed to `:latest`; fix immediately. Run after every install/upgrade. |
 
 ## Conventions
 
