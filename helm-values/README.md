@@ -9,6 +9,8 @@ Stored here so they survive a full controller wipe. Without this, the only copy 
 | File | Chart | Cluster release | Notes |
 |---|---|---|---|
 | `backstage-values.yaml` | `backstage/backstage` (chart `backstage-2.7.0`) | `backstage/backstage` | Pinned to image tag `1.51.2` after `:latest` hit a `NotImplementedError: plugin.notifications.service`. Postgres subchart in standalone mode on Longhorn (1 GiB PVC). |
+| `ollama-values.yaml` | `ollama/ollama` (chart `ollama-1.56.0`) | `ollama/ollama` | Pinned to image tag `0.23.2` to lock the validated llama3.2:3b + Open WebUI integration. CPU-only inference on ThinkPads, 10 GiB Longhorn PVC for model storage. |
+| `authentik-values.yaml` | `authentik/authentik` (chart `2026.5.3`) | `authentik/authentik` | Phase 23 SSO + IAM identity provider. Single server + worker, Postgres on Longhorn (1 GiB PVC). Secret_key + Postgres password use `{{PLACEHOLDER}}` substitution (the chart's `existingSecret.secretName` mechanism doesn't preserve non-secret postgres host/port/etc. fields). See the file header for the substitution one-liner. |
 
 ## Workflow
 
