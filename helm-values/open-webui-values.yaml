@@ -1,0 +1,96 @@
+# Open WebUI values for minicloud Phase 19.
+# Talks to the Ollama service we already installed (cluster-internal).
+
+# Disable the chart's bundled Ollama subchart — we have our own
+# (otwld/ollama installed separately in the same `ai` namespace).
+ollama:
+  enabled: false
+
+# Point at the existing Ollama service via cluster DNS.
+ollamaUrls:
+  - http://ollama.ai.svc:11434
+
+# Disable the Pipelines feature (extra plugins server) — not needed for
+# Phase 19. Adds memory + complexity if enabled.
+pipelines:
+  enabled: false
+
+# Disable RAG document parser sidecars — they're optional
+tika:
+  enabled: false
+
+websocket:
+  enabled: false
+
+redis-cluster:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    # Open WebUI bundles sentence-transformers and embedding models for
+    # RAG; startup needs 700-900 MiB before any chat traffic. 512 MiB
+    # OOMKills it during init. 1.5 GiB gives comfortable headroom.
+    memory: 1500Mi
+
+# SQLite-backed (default) — no external Postgres needed for single-user demo.
+# Persistence holds chat history, RAG embeddings, user settings.
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: longhorn
+  accessModes: [ReadWriteOnce]
+
+# Disable chart's Ingress — we add our own with cert-manager TLS.
+ingress:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 80
+  containerPort: 8080
+
+# Phase 23 Stage 5 — Authentik OIDC integration.
+# Open WebUI 0.4+ supports OAuth2/OIDC natively via env vars.
+# - OAUTH_CLIENT_ID + OAUTH_CLIENT_SECRET injected from the openwebui-oidc
+#   Secret (out-of-band, created via kubectl)
+# - OAUTH_PROVIDER_NAME determines the button label on the login page
+# - ENABLE_OAUTH_SIGNUP=true means SSO users get auto-provisioned
+#   accounts on first login (matches the "auto-onboard" pattern used by
+#   Harbor + Grafana)
+# - Local admin signup-flow is preserved as emergency fallback (the
+#   first-signed-up user is the admin; subsequent local signups require
+#   admin approval).
+extraEnvVars:
+  - name: WEBUI_NAME
+    value: "minicloud chat"
+  - name: WEBUI_URL
+    value: "https://chat.10.0.0.200.nip.io"
+  - name: ENABLE_OAUTH_SIGNUP
+    value: "true"
+  - name: OAUTH_MERGE_ACCOUNTS_BY_EMAIL
+    value: "true"
+  - name: OAUTH_PROVIDER_NAME
+    value: "Authentik"
+  - name: OPENID_PROVIDER_URL
+    value: "https://auth.10.0.0.200.nip.io/application/o/open-webui/.well-known/openid-configuration"
+  - name: OAUTH_SCOPES
+    value: "openid email profile groups"
+  # Optional: map Authentik 'authentik Admins' group claim -> Open WebUI admin role
+  - name: ENABLE_OAUTH_ROLE_MANAGEMENT
+    value: "true"
+  - name: OAUTH_ROLES_CLAIM
+    value: "groups"
+  - name: OAUTH_ALLOWED_ROLES
+    value: "authentik Admins,Users"
+  - name: OAUTH_ADMIN_ROLES
+    value: "authentik Admins"
+
+# OAUTH_CLIENT_ID + OAUTH_CLIENT_SECRET come from this Secret
+# (created out-of-band so they don't live in this YAML or in git).
+extraEnvFrom:
+  - secretRef:
+      name: openwebui-oidc
