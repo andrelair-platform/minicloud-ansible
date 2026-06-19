@@ -1,0 +1,192 @@
+fullnameOverride: kps
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+prometheus:
+  prometheusSpec:
+    retention: 10d
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 4Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 15Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 1Gi
+
+grafana:
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  # Phase 23 Stage 3 — Authentik OIDC integration.
+  # Group claim -> Grafana role mapping via role_attribute_path:
+  #   authentik Admins  -> GrafanaAdmin (full org + server admin)
+  #   any authenticated -> Viewer (read-only)
+  # Local admin account (~/.grafana-admin) is preserved as emergency fallback.
+  grafana.ini:
+    server:
+      root_url: https://grafana.10.0.0.200.nip.io
+    auth.generic_oauth:
+      enabled: true
+      name: Authentik
+      icon: signin
+      allow_sign_up: true
+      auto_login: false
+      # client_id + client_secret injected via env vars from the
+      # grafana-oidc Secret (see envFromSecret below).
+      auth_url: https://auth.10.0.0.200.nip.io/application/o/authorize/
+      token_url: https://auth.10.0.0.200.nip.io/application/o/token/
+      api_url: https://auth.10.0.0.200.nip.io/application/o/userinfo/
+      scopes: openid profile email groups
+      use_pkce: true
+      allow_assign_grafana_admin: true
+      role_attribute_path: contains(groups[*], 'authentik Admins') && 'GrafanaAdmin' || 'Viewer'
+      role_attribute_strict: false
+  envFromSecret: grafana-oidc
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: longhorn
+    accessModes: [ReadWriteOnce]
+    size: 5Gi
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.org/redirect-to-https: "true"
+    hosts:
+      - grafana.10.0.0.200.nip.io
+    path: /
+    pathType: Prefix
+    tls:
+      - hosts:
+          - grafana.10.0.0.200.nip.io
+        secretName: grafana-tls
+  # Phase 21: Loki added as a second datasource (alongside the
+  # Prometheus datasource the chart provisions automatically).
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki.observability.svc:3100
+      isDefault: false
+      editable: false
+      jsonData:
+        maxLines: 1000
+        timeout: 60
+
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+
+# Phase 21: replace the chart's default null-receiver alertmanager
+# config with a 3-tier routing tree → in-cluster webhook receiver.
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+    inhibit_rules:
+      - source_matchers: ['severity = critical']
+        target_matchers: ['severity =~ "warning|info"']
+        equal: [namespace, alertname]
+      - source_matchers: ['severity = warning']
+        target_matchers: ['severity = info']
+        equal: [namespace, alertname]
+    route:
+      group_by: [alertname, namespace]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: webhook-default
+      routes:
+        - matchers: ['alertname = "Watchdog"']
+          receiver: "null"
+        - matchers: ['alertname =~ "KubeProxyDown|KubeControllerManagerDown|KubeSchedulerDown"']
+          receiver: "null"
+        - matchers: ['severity = critical']
+          receiver: webhook-critical
+          continue: false
+        - matchers: ['severity = warning']
+          receiver: webhook-default
+          continue: false
+        - matchers: ['severity = info']
+          receiver: "null"
+    receivers:
+      - name: "null"
+      - name: webhook-default
+        webhook_configs:
+          - url: http://alert-webhook-logger.monitoring.svc:80/
+            send_resolved: true
+      - name: webhook-critical
+        webhook_configs:
+          - url: http://alert-webhook-logger.monitoring.svc:80/
+            send_resolved: true
+    templates:
+      - /etc/alertmanager/config/*.tmpl
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      # 100m caused 38-69% CPU throttling on each node — node-exporter
+      # bursts well above 100m during scrape intervals. 250m gives
+      # headroom for scrape bursts without making it a CPU hog.
+      cpu: 250m
+      memory: 128Mi

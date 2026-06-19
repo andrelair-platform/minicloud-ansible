@@ -1,0 +1,93 @@
+global:
+  domain: argocd.10.0.0.200.nip.io
+
+# Phase 15: TLS terminated at the NGINX Ingress, cert from cert-manager.
+# Keep server.insecure: true so argocd-server speaks plain HTTP internally
+# (the cluster traffic Ingress -> argocd-server stays inside the cluster);
+# the public-facing TLS handshake happens at the Ingress.
+configs:
+  params:
+    server.insecure: true
+  cm:
+    # Enable resource exclusions / inclusions later if needed
+    timeout.reconciliation: 180s
+    # Phase 23 Stage 3 — Authentik OIDC integration
+    url: https://argocd.10.0.0.200.nip.io
+    oidc.config: |
+      name: Authentik
+      issuer: https://auth.10.0.0.200.nip.io/application/o/argocd/
+      clientID: gKTS6lKgXhvP2t2rlUu8QhkzFo2itrY8c3szNv9M
+      clientSecret: $argocd-oidc:clientSecret
+      requestedScopes: ["openid", "profile", "email", "groups"]
+      requestedIDTokenClaims:
+        groups:
+          essential: true
+  rbac:
+    # Group claim -> ArgoCD role mapping. The "authentik Admins" group
+    # (created by the chart's bootstrap blueprint) → role:admin.
+    # Anyone else who logs in (any authenticated Authentik user) gets
+    # role:readonly via policy.default. Local 'admin' account remains
+    # as emergency fallback even after OIDC is enabled.
+    policy.default: role:readonly
+    policy.csv: |
+      g, authentik Admins, role:admin
+    scopes: '[groups]'
+
+server:
+  # F5 NGINX Ingress gets confused when the chart's default Service has both
+  # http (port 80 -> 8080) and https (port 443 -> 8080) — duplicate
+  # targetPorts make endpointslice resolution fail with "no endpointslices
+  # for target port 8080". Override service to expose only the http port.
+  service:
+    type: ClusterIP
+    servicePortHttp: 80
+    servicePortHttpName: http
+    servicePortHttps: 443
+    servicePortHttpsName: https
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hostname: argocd.10.0.0.200.nip.io
+    # NB: do not add `nginx.org/proxy-buffer-size: "16k"` — it conflicts
+    # with the default proxy_buffers config and makes nginx -s reload fail
+    # with "proxy_busy_buffers_size must be less than the size of all
+    # proxy_buffers minus one buffer". Keeps every Ingress in the cluster
+    # broken until removed.
+    annotations:
+      nginx.org/redirect-to-https: "true"
+    tls: true            # chart auto-creates a tls section using the secretName below
+    extraTls:
+      - hosts:
+          - argocd.10.0.0.200.nip.io
+        secretName: argocd-tls
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+repoServer:
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
+
+applicationSet:
+  resources:
+    requests: { cpu: 25m,  memory: 64Mi }
+    limits:   { cpu: 250m, memory: 256Mi }
+
+# Disable Dex (no OIDC yet — Phase 15 will add Keycloak)
+dex:
+  enabled: false
+
+# Disable notifications controller — Phase 21 territory
+notifications:
+  enabled: false
+
+redis:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits:   { cpu: 250m, memory: 128Mi }
