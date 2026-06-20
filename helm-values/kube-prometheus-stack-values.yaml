@@ -99,6 +99,7 @@ grafana:
       nginx.org/redirect-to-https: "true"
     hosts:
       - grafana.10.0.0.200.nip.io
+      - grafana.devandre.sbs
     path: /
     pathType: Prefix
     tls:
