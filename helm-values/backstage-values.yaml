@@ -6,17 +6,11 @@ backstage:
   replicas: 1
 
   image:
-    # ghcr.io is routed through Harbor's ghcr proxy (Phase 16) automatically
-    # via the cluster's registries.yaml mirror; nothing to override here.
-    registry: ghcr.io
-    repository: backstage/backstage
-    # Pinned 2026-06-15: ":latest" was hitting
-    # NotImplementedError: No implementation available for apiRef{plugin.notifications.service}
-    # The notifications plugin shipped in the off-the-shelf frontend bundle
-    # without the backend wiring. Fixed upstream in 1.49.0 via a no-op
-    # fallback. Picking 1.51.2 (latest published tag at time of pin) so we
-    # also pick up subsequent fixes and avoid future "latest" drift.
-    tag: "1.51.2"
+    # Phase 24 custom image — built from andrelair-platform/minicloud-backstage
+    registry: harbor.10.0.0.200.nip.io
+    repository: library/backstage
+    # git SHA: bcec03f — built 2026-06-20
+    tag: "bcec03f-amd64"
 
   resources:
     requests: { cpu: 100m, memory: 384Mi }
@@ -60,16 +54,19 @@ backstage:
         # if not provided; we let it.
         keys: []
     auth:
-      # Guest auth: anyone hitting the UI gets logged in automatically.
-      # Real SSO (Keycloak/GitHub) deferred to a future phase.
-      # The "dangerously" flag is required because the off-the-shelf
-      # image runs NODE_ENV=production, where guest is gated by default.
-      # Acceptable here: the Backstage instance is internal-only via
-      # the cluster's TLS Ingress on a private nip.io hostname, and
-      # the catalog contains no sensitive data (just public repo metadata).
+      environment: production
       providers:
-        guest:
-          dangerouslyAllowOutsideDevelopment: true
+        oidc:
+          production:
+            metadataUrl: https://auth.10.0.0.200.nip.io/application/o/backstage/.well-known/openid-configuration
+            clientId: ${AUTH_OIDC_CLIENT_ID}
+            clientSecret: ${AUTH_OIDC_CLIENT_SECRET}
+            callbackUrl: https://backstage.10.0.0.200.nip.io/api/auth/oidc/handler/frame
+            additionalScopes: []
+            signIn:
+              resolvers:
+                - resolver: emailMatchingUserEntityProfileEmail
+                - resolver: emailLocalPartMatchingUserEntityName
     catalog:
       rules:
         - allow: [Component, System, API, Resource, Location]
@@ -87,6 +84,30 @@ backstage:
           target: https://raw.githubusercontent.com/andrelair-platform/minicloud-gitops/main/catalog-info.yaml
         - type: url
           target: https://raw.githubusercontent.com/andrelair-platform/platform-demo/main/catalog-info.yaml
+        - type: url
+          target: https://raw.githubusercontent.com/andrelair-platform/minicloud-backstage/main/catalog-info.yaml
+    grafana:
+      domain: https://grafana.10.0.0.200.nip.io
+    kubernetes:
+      serviceLocatorMethod:
+        type: 'multiTenant'
+      clusterLocatorMethods:
+        - type: 'config'
+          clusters:
+            - name: minicloud
+              url: https://10.0.0.2:6443
+              authProvider: 'serviceAccount'
+              serviceAccountToken: ${K8S_SA_TOKEN}
+              caData: ${K8S_CA_DATA}
+              skipTLSVerify: false
+    argocd:
+      username: ${ARGOCD_USERNAME}
+      password: ${ARGOCD_PASSWORD}
+      appLocatorMethods:
+        - type: 'config'
+          instances:
+            - name: minicloud
+              url: https://argocd.10.0.0.200.nip.io
 
   extraEnvVars:
     - name: POSTGRES_HOST
@@ -100,6 +121,36 @@ backstage:
         secretKeyRef:
           name: backstage-postgres-secret
           key: password
+    - name: K8S_SA_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: backstage-phase24-secret
+          key: k8s-sa-token
+    - name: K8S_CA_DATA
+      valueFrom:
+        secretKeyRef:
+          name: backstage-phase24-secret
+          key: k8s-ca-data
+    - name: AUTH_OIDC_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: backstage-phase24-secret
+          key: auth-oidc-client-id
+    - name: AUTH_OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: backstage-phase24-secret
+          key: auth-oidc-client-secret
+    - name: ARGOCD_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: backstage-phase24-secret
+          key: argocd-username
+    - name: ARGOCD_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: backstage-phase24-secret
+          key: argocd-password
 
 # Disable the chart's Ingress — we'll add our own with cert-manager TLS.
 ingress:
