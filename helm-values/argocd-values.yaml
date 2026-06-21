@@ -62,6 +62,9 @@ server:
       - hosts:
           - argocd.10.0.0.200.nip.io
         secretName: argocd-tls
+      - hosts:
+          - argocd.devandre.sbs
+        secretName: argocd-tls
     extraRules:
       - host: argocd.devandre.sbs
         http:
@@ -70,7 +73,7 @@ server:
               pathType: Prefix
               backend:
                 service:
-                  name: argocd-server
+                  name: argo-cd-argocd-server
                   port:
                     number: 80
   resources:

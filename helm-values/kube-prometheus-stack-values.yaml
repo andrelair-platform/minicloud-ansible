@@ -122,6 +122,9 @@ grafana:
       - hosts:
           - grafana.10.0.0.200.nip.io
         secretName: grafana-tls
+      - hosts:
+          - grafana.devandre.sbs
+        secretName: grafana-tls
   # Phase 21: Loki added as a second datasource (alongside the
   # Prometheus datasource the chart provisions automatically).
   additionalDataSources:
