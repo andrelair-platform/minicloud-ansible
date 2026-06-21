@@ -62,7 +62,7 @@ grafana:
   # Local admin account (~/.grafana-admin) preserved as emergency fallback.
   grafana.ini:
     server:
-      root_url: https://grafana.10.0.0.200.nip.io
+      root_url: https://grafana.devandre.sbs
     auth.generic_oauth:
       enabled: true
       name: Authentik
@@ -71,9 +71,9 @@ grafana:
       auto_login: false
       # client_id + client_secret injected via env vars from the
       # grafana-oidc Secret (see envFromSecret below).
-      auth_url: https://auth.10.0.0.200.nip.io/application/o/authorize/
-      token_url: https://auth.10.0.0.200.nip.io/application/o/token/
-      api_url: https://auth.10.0.0.200.nip.io/application/o/userinfo/
+      auth_url: https://auth.devandre.sbs/application/o/authorize/
+      token_url: https://auth.devandre.sbs/application/o/token/
+      api_url: https://auth.devandre.sbs/application/o/userinfo/
       scopes: openid profile email groups
       use_pkce: true
       allow_assign_grafana_admin: true
