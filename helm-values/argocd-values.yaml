@@ -15,7 +15,7 @@ configs:
     url: https://argocd.devandre.sbs
     oidc.config: |
       name: Authentik
-      issuer: https://auth.10.0.0.200.nip.io/application/o/argocd/
+      issuer: https://auth.10.0.0.200.nip.io/application/o/argo-cd/
       clientID: gKTS6lKgXhvP2t2rlUu8QhkzFo2itrY8c3szNv9M
       clientSecret: $argocd-oidc:clientSecret
       requestedScopes: ["openid", "profile", "email", "groups"]
