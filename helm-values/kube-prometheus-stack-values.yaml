@@ -54,11 +54,12 @@ grafana:
     existingSecret: grafana-admin-credentials
     userKey: admin-user
     passwordKey: admin-password
-  # Phase 23 Stage 3 — Authentik OIDC integration.
-  # Group claim -> Grafana role mapping via role_attribute_path:
-  #   authentik Admins  -> GrafanaAdmin (full org + server admin)
-  #   any authenticated -> Viewer (read-only)
-  # Local admin account (~/.grafana-admin) is preserved as emergency fallback.
+  # Phase 33 — department RBAC. Group claim → Grafana role:
+  #   GrafanaAdmin: authentik Admins, Platform Admins, Direction IT, Cybersécurité, Data & Analytics
+  #   Viewer:       Direction Transformation, Actuariat, Souscription, Sinistres, Finance,
+  #                 Réassurance, Juridique, Opérations, Audit
+  #   (no access):  Direction Commercial, RH, Services Généraux — blocked at Authentik binding layer
+  # Local admin account (~/.grafana-admin) preserved as emergency fallback.
   grafana.ini:
     server:
       root_url: https://grafana.10.0.0.200.nip.io
@@ -76,7 +77,13 @@ grafana:
       scopes: openid profile email groups
       use_pkce: true
       allow_assign_grafana_admin: true
-      role_attribute_path: contains(groups[*], 'authentik Admins') && 'GrafanaAdmin' || 'Viewer'
+      role_attribute_path: >-
+        contains(groups[*], 'authentik Admins') && 'GrafanaAdmin'
+        || contains(groups[*], 'Platform Admins') && 'GrafanaAdmin'
+        || contains(groups[*], 'Direction IT / SI') && 'GrafanaAdmin'
+        || contains(groups[*], 'Direction Cybersécurité') && 'GrafanaAdmin'
+        || contains(groups[*], 'Direction Data & Analytics') && 'GrafanaAdmin'
+        || 'Viewer'
       role_attribute_strict: false
   envFromSecret: grafana-oidc
   resources:
@@ -86,6 +93,15 @@ grafana:
     limits:
       cpu: 200m
       memory: 512Mi
+  sidecar:
+    dashboards:
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 100m, memory: 128Mi}
+    datasources:
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 100m, memory: 128Mi}
   persistence:
     enabled: true
     type: pvc

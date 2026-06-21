@@ -23,14 +23,16 @@ configs:
         groups:
           essential: true
   rbac:
-    # Group claim -> ArgoCD role mapping. The "authentik Admins" group
-    # (created by the chart's bootstrap blueprint) → role:admin.
-    # Anyone else who logs in (any authenticated Authentik user) gets
-    # role:readonly via policy.default. Local 'admin' account remains
-    # as emergency fallback even after OIDC is enabled.
-    policy.default: role:readonly
+    # Group claim -> ArgoCD role mapping (Phase 33 — department RBAC).
+    # policy.default: deny — unrecognised groups get no access at all.
+    # Local 'admin' account remains as emergency fallback.
+    policy.default: role:''
     policy.csv: |
       g, authentik Admins, role:admin
+      g, Platform Admins, role:admin
+      g, Direction IT / SI, role:admin
+      g, Direction Cybersécurité, role:readonly
+      g, Direction Audit Interne, role:readonly
     scopes: '[groups]'
 
 server:
