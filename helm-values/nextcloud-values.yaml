@@ -7,7 +7,7 @@ nextcloud:
   existingSecret:
     enabled: true
     secretName: nextcloud-secrets
-    usernameKey: ""
+    usernameKey: nextcloud-admin-username
     passwordKey: nextcloud-admin-password
     smtpUsernameKey: ""
     smtpPasswordKey: smtp-password
