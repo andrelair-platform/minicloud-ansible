@@ -27,6 +27,8 @@ nextcloud:
         'trusted_proxies' => ['10.42.0.0/16'],
         'default_phone_region' => 'FR',
         'maintenance_window_start' => 1,
+        // Allow Nextcloud HTTP client to reach in-cluster private IPs (Authentik OIDC discovery)
+        'allow_local_remote_servers' => true,
       );
 
   # Mail via Zoho SMTP (filled in after Zoho is configured)
