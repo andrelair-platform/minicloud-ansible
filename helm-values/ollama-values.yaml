@@ -1,6 +1,8 @@
-# Ollama values for minicloud Phase 19.
-# CPU-only inference (no NVIDIA GPUs on the ThinkPads), 1 replica,
-# Longhorn-backed persistent volume for downloaded model weights.
+# Ollama values for minicloud Phase 19 (updated Phase 65/#64 2026-06-25).
+# CPU-only inference (no NVIDIA GPUs on the ThinkPads), 1 replica.
+# Pinned to fast-heron with local-path storage — model weights are static
+# re-downloadable assets; Longhorn replication adds network overhead with
+# no benefit. local-path gives ~zero-latency local NVMe reads on load.
 
 image:
   registry: docker.io
@@ -36,9 +38,12 @@ resources:
     cpu: "4"
     memory: 8Gi
 
+nodeSelector:
+  kubernetes.io/hostname: fast-heron
+
 persistentVolume:
   enabled: true
-  storageClass: longhorn
-  size: 10Gi          # one 3B model is ~2 GiB; room for a 7B follow-up
+  storageClass: local-path
+  size: 10Gi          # llama3.2:3b is ~2 GiB; room for a 7B follow-up
   accessModes:
     - ReadWriteOnce
