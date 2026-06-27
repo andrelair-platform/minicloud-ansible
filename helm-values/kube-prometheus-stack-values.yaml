@@ -16,6 +16,8 @@ prometheus:
     annotations:
       nginx.org/redirect-to-https: "true"
       cert-manager.io/cluster-issuer: minicloud-ca
+      cert-manager.io/duration: "2160h"
+      cert-manager.io/renew-before: "720h"
     hosts:
       - prometheus.10.0.0.200.nip.io
     tls:
@@ -50,6 +52,8 @@ alertmanager:
     annotations:
       nginx.org/redirect-to-https: "true"
       cert-manager.io/cluster-issuer: minicloud-ca
+      cert-manager.io/duration: "2160h"
+      cert-manager.io/renew-before: "720h"
     hosts:
       - alertmanager.10.0.0.200.nip.io
     tls:
