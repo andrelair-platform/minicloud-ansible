@@ -1,24 +1,12 @@
 # Authentik values for minicloud Phase 23 — SSO + IAM.
 # Single-replica server + worker, Postgres on Longhorn.
 #
-# IMPORTANT — secret substitution:
-# This file uses placeholders for sensitive values. Real values live in
-# mode-600 files under /home/ktayl/.authentik-*. The deployment workflow:
-#
-#   SECRET_KEY=$(cat ~/.authentik-secret-key)
-#   PG_PASSWORD=$(cat ~/.authentik-postgres)
-#   sed -e "s|{{SECRET_KEY}}|${SECRET_KEY}|" \
-#       -e "s|{{POSTGRES_PASSWORD}}|${PG_PASSWORD}|" \
-#       authentik-values.yaml > /tmp/authentik-values-rendered.yaml
-#   chmod 600 /tmp/authentik-values-rendered.yaml
-#   helm install authentik authentik/authentik --version 2026.5.3 \
-#     -n authentik -f /tmp/authentik-values-rendered.yaml
-#
-# (Why not the chart's `existingSecret.secretName` field? Because setting
-# it makes the chart skip auto-creating the env-var ConfigMap/Secret,
-# which means non-secret postgresql.host/port/name/user also fail to
-# inject. Inline substitution into the rendered file is the most
-# reliable path until the upstream chart fixes that behavior.)
+# Secrets injected via envFrom from ESO-managed k8s Secrets (backed by Vault KV).
+# The chart creates the `authentik` Secret from these values, but the
+# `authentik-env-secrets` envFrom entry (listed last) overrides duplicate keys.
+# Two secret values NOT set here (injected via envFrom instead):
+#   AUTHENTIK_SECRET_KEY         ← secret/platform/authentik-env in Vault
+#   AUTHENTIK_POSTGRESQL__PASSWORD ← secret/platform/authentik-env in Vault
 #
 # Image source: ghcr.io/goauthentik/server — routed through Phase 16
 # Harbor ghcr proxy automatically via the cluster's registries.yaml mirror.
@@ -27,16 +15,14 @@
 authentik:
   log_level: info
 
-  # Persistent cookie-signing key — DO NOT change after first install
-  # (would invalidate every active session). Generated once via
-  # `openssl rand -base64 32 > ~/.authentik-secret-key`.
-  secret_key: "{{SECRET_KEY}}"
+  # secret_key and postgresql.password are intentionally omitted here.
+  # They are injected at runtime via envFrom: authentik-env-secrets (ESO → Vault).
+  # DO NOT add secret_key back — changing it invalidates all active sessions.
 
   postgresql:
     host: "authentik-postgresql"
     name: "authentik"
     user: "authentik"
-    password: "{{POSTGRES_PASSWORD}}"
     port: 5432
 
   error_reporting:
@@ -60,6 +46,8 @@ server:
   envFrom:
     - secretRef:
         name: authentik-bootstrap
+    - secretRef:
+        name: authentik-env-secrets   # ESO → Vault platform/authentik-env (overrides chart-set values)
 
 # Authentik worker (background tasks: blueprint apply, email, periodic policies)
 worker:
@@ -71,6 +59,8 @@ worker:
   envFrom:
     - secretRef:
         name: authentik-bootstrap
+    - secretRef:
+        name: authentik-env-secrets   # ESO → Vault platform/authentik-env (overrides chart-set values)
 
 # Bitnami PostgreSQL subchart. Chart default uses library/postgres,
 # NOT bitnami/postgresql — so no AGPL licensing gotcha.
