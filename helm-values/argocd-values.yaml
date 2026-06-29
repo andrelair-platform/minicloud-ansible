@@ -11,6 +11,9 @@ configs:
   cm:
     # Enable resource exclusions / inclusions later if needed
     timeout.reconciliation: 180s
+    # Disable local admin — OIDC (Authentik) is the only login path.
+    # Break-glass: kubectl --context minicloud-break-glass + kubectl exec into argocd-server.
+    admin.enabled: "false"
     # Phase 23 Stage 3 — Authentik OIDC integration
     url: https://argocd.devandre.sbs
     oidc.config: |
@@ -39,7 +42,7 @@ configs:
   rbac:
     # Group claim -> ArgoCD role mapping (Phase 33 — department RBAC).
     # policy.default: deny — unrecognised groups get no access at all.
-    # Local 'admin' account remains as emergency fallback.
+    # Local admin account disabled (admin.enabled: false above).
     policy.default: role:''
     policy.csv: |
       g, authentik Admins, role:admin
