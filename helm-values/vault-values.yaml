@@ -1,5 +1,7 @@
 injector:
   enabled: true
+  agentImage:
+    repository: docker.io/hashicorp/vault
   resources:
     requests:
       cpu: 50m
