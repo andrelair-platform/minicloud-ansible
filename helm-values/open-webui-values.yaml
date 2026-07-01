@@ -67,8 +67,14 @@ service:
 extraEnvVars:
   - name: WEBUI_NAME
     value: "minicloud chat"
+  - name: DEFAULT_MODELS
+    value: "phi3-financial:latest"
+  - name: ENABLE_API_KEY
+    value: "true"
+  - name: USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS
+    value: "true"
   - name: WEBUI_URL
-    value: "https://chat.10.0.0.200.nip.io"
+    value: "https://chat.devandre.sbs"
   - name: ENABLE_OAUTH_SIGNUP
     value: "true"
   - name: OAUTH_MERGE_ACCOUNTS_BY_EMAIL
@@ -76,7 +82,7 @@ extraEnvVars:
   - name: OAUTH_PROVIDER_NAME
     value: "Authentik"
   - name: OPENID_PROVIDER_URL
-    value: "https://auth.10.0.0.200.nip.io/application/o/open-webui/.well-known/openid-configuration"
+    value: "https://auth.devandre.sbs/application/o/open-webui/.well-known/openid-configuration"
   - name: OAUTH_SCOPES
     value: "openid email profile groups"
   # Optional: map Authentik 'authentik Admins' group claim -> Open WebUI admin role
@@ -88,9 +94,44 @@ extraEnvVars:
     value: "authentik Admins,Users"
   - name: OAUTH_ADMIN_ROLES
     value: "authentik Admins"
+  # Minicloud CA is not in the container's default trust store.
+  # SSL_CERT_FILE points to a combined bundle built by the init container below.
+  - name: SSL_CERT_FILE
+    value: /ca-bundle/bundle.crt
 
 # OAUTH_CLIENT_ID + OAUTH_CLIENT_SECRET come from this Secret
 # (created out-of-band so they don't live in this YAML or in git).
 extraEnvFrom:
   - secretRef:
       name: openwebui-oidc
+
+# Init container concatenates system CAs + minicloud CA into one bundle.
+# The main container inherits SSL_CERT_FILE pointing to it.
+extraInitContainers:
+  - name: inject-minicloud-ca
+    image: ghcr.io/open-webui/open-webui:0.9.4
+    command: ["/bin/sh", "-c"]
+    args:
+      - cat /etc/ssl/certs/ca-certificates.crt /minicloud-ca/ca.crt > /ca-bundle/bundle.crt
+    volumeMounts:
+      - name: minicloud-ca
+        mountPath: /minicloud-ca
+      - name: ca-bundle
+        mountPath: /ca-bundle
+
+volumes:
+  - name: minicloud-ca
+    configMap:
+      name: minicloud-ca
+  - name: ca-bundle
+    emptyDir: {}
+
+volumeMounts:
+  container:
+    - name: ca-bundle
+      mountPath: /ca-bundle
+  initContainer:
+    - name: minicloud-ca
+      mountPath: /minicloud-ca
+    - name: ca-bundle
+      mountPath: /ca-bundle
