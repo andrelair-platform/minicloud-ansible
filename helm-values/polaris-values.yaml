@@ -1,0 +1,24 @@
+dashboard:
+  enable: true
+  port: 8080
+
+webhook:
+  enable: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10324
+  fsGroup: 10324
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]

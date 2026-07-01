@@ -24,7 +24,18 @@ falcoctl:
       enabled: false
 
 falcosidekick:
-  enabled: false
+  enabled: true
+  config:
+    alertmanager:
+      hostport: "http://kps-alertmanager.monitoring.svc.cluster.local:9093"
+      minimumpriority: "warning"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
 
 resources:
   requests:
