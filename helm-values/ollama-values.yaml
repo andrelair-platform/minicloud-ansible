@@ -41,6 +41,11 @@ resources:
 nodeSelector:
   kubernetes.io/hostname: fast-heron
 
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
 persistentVolume:
   enabled: true
   storageClass: local-path

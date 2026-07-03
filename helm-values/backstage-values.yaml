@@ -4,6 +4,8 @@
 
 backstage:
   replicas: 1
+  strategy:
+    type: Recreate
 
   image:
     # Phase 24 custom image — built from andrelair-platform/minicloud-backstage
@@ -15,6 +17,11 @@ backstage:
   resources:
     requests: { cpu: 100m, memory: 384Mi }
     limits:   { cpu: 1000m, memory: 1Gi }
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 
   # Backstage's port (default 7007 in the off-the-shelf image)
   containerPorts:

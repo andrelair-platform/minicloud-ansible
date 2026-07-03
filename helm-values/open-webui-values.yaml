@@ -36,6 +36,11 @@ resources:
     # OOMKills it during init. 1.5 GiB gives comfortable headroom.
     memory: 1500Mi
 
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
 # SQLite-backed (default) — no external Postgres needed for single-user demo.
 # Persistence holds chat history, RAG embeddings, user settings.
 persistence:
@@ -113,6 +118,10 @@ extraInitContainers:
     command: ["/bin/sh", "-c"]
     args:
       - cat /etc/ssl/certs/ca-certificates.crt /minicloud-ca/ca.crt > /ca-bundle/bundle.crt
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
     volumeMounts:
       - name: minicloud-ca
         mountPath: /minicloud-ca
