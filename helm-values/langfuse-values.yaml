@@ -13,6 +13,12 @@ langfuse:
     level: info
     format: json
 
+  # Salt for API key hashing — required, stored in Vault
+  salt:
+    secretKeyRef:
+      name: langfuse-secrets
+      key: salt
+
   features:
     telemetryEnabled: false
     signUpDisabled: true
