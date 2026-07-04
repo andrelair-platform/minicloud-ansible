@@ -1,6 +1,6 @@
 ---
 # LiteLLM AI Gateway — ConfigMap with proxy config.
-# Routes: phi3-financial + llama3.2:3b across two Ollama instances.
+# Routes: phi3-financial + llama3.2:3b + llama3.2:1b across two Ollama instances.
 # least-busy router ensures requests go to the idle instance.
 apiVersion: v1
 kind: ConfigMap
@@ -29,6 +29,16 @@ data:
       - model_name: llama3.2:3b
         litellm_params:
           model: ollama/llama3.2:3b
+          api_base: http://ollama-secondary.ai.svc.cluster.local:11434
+      # llama3.2:1b on primary Ollama — fast tier (simple queries)
+      - model_name: llama3.2:1b
+        litellm_params:
+          model: ollama/llama3.2:1b
+          api_base: http://ollama.ai.svc.cluster.local:11434
+      # llama3.2:1b on secondary Ollama
+      - model_name: llama3.2:1b
+        litellm_params:
+          model: ollama/llama3.2:1b
           api_base: http://ollama-secondary.ai.svc.cluster.local:11434
 
     router_settings:
