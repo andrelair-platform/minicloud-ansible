@@ -48,6 +48,29 @@ langfuse:
       cpu: 1500m
       memory: 2Gi
 
+  # Authentik OIDC — inject via environment variables (additionalEnvFrom)
+  # AUTH_CUSTOM_* env vars configure NextAuth.js custom OIDC provider
+  additionalEnvFrom:
+    - secretRef:
+        name: langfuse-oidc-env
+
+  # Pre-provision org, project, and API keys on first startup
+  additionalEnv:
+    - name: AUTH_CUSTOM_NAME
+      value: "Authentik"
+    - name: AUTH_CUSTOM_SCOPE
+      value: "openid email profile"
+    - name: AUTH_CUSTOM_ISSUER
+      value: "https://auth.devandre.sbs/application/o/langfuse/"
+    - name: AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING
+      value: "true"
+    - name: AUTH_CUSTOM_ADMIN_EMAILS
+      value: "kanmegnea@gmail.com"
+    - name: LANGFUSE_INIT_ORG_NAME
+      value: "minicloud-platform"
+    - name: LANGFUSE_INIT_PROJECT_NAME
+      value: "ai-gateway"
+
 # External PostgreSQL (postgresql-ai-0 in ai namespace)
 postgresql:
   deploy: false
