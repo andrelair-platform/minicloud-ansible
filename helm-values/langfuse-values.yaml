@@ -42,11 +42,11 @@ langfuse:
 
   resources:
     requests:
-      cpu: 100m
+      cpu: 200m
       memory: 512Mi
     limits:
-      cpu: 1000m
-      memory: 1Gi
+      cpu: 1500m
+      memory: 2Gi
 
 # External PostgreSQL (postgresql-ai-0 in ai namespace)
 postgresql:
@@ -77,12 +77,15 @@ clickhouse:
     image:
       repository: bitnamilegacy/zookeeper
 
-# Redis/Valkey — internal standalone
+# Redis/Valkey — internal standalone, no auth (Langfuse connects without password)
 redis:
   deploy: true
   architecture: standalone
   image:
     repository: bitnamilegacy/valkey
+  auth:
+    enabled: false
+    password: ""
   primary:
     extraFlags:
       - "--maxmemory-policy noeviction"
