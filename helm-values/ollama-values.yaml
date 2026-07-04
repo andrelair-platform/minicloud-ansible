@@ -41,6 +41,28 @@ resources:
 nodeSelector:
   kubernetes.io/hostname: fast-heron
 
+# Inference tuning — CPU-only path on Intel i7-8565U (8 threads, AVX2).
+# NUM_PARALLEL=4: serve 4 concurrent requests (8 threads / 2 per worker).
+# NUM_THREADS=6: leave 2 threads for k8s/OS housekeeping.
+# FLASH_ATTENTION=1: reduced memory bandwidth on CPU path (Ollama 0.23+).
+# KV_CACHE_TYPE=q8_0: quantize KV cache — cuts memory, speeds long contexts.
+# NUM_CTX=4096: cap context window; 4096 covers RAG use case.
+extraEnv:
+  - name: OLLAMA_HOST
+    value: "0.0.0.0:11434"
+  - name: OLLAMA_NUM_PARALLEL
+    value: "4"
+  - name: OLLAMA_NUM_THREADS
+    value: "6"
+  - name: OLLAMA_MAX_LOADED_MODELS
+    value: "2"
+  - name: OLLAMA_FLASH_ATTENTION
+    value: "1"
+  - name: OLLAMA_KV_CACHE_TYPE
+    value: "q8_0"
+  - name: OLLAMA_NUM_CTX
+    value: "4096"
+
 securityContext:
   allowPrivilegeEscalation: false
   capabilities:

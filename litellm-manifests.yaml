@@ -1,0 +1,143 @@
+---
+# LiteLLM AI Gateway — ConfigMap with proxy config.
+# Routes: phi3-financial + llama3.2:3b across two Ollama instances.
+# least-busy router ensures requests go to the idle instance.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: ai
+data:
+  config.yaml: |
+    model_list:
+      # phi3-financial on primary Ollama (fast-heron)
+      - model_name: phi3-financial
+        litellm_params:
+          model: ollama/phi3-financial
+          api_base: http://ollama.ai.svc.cluster.local:11434
+      # phi3-financial on secondary Ollama (star-kitten)
+      - model_name: phi3-financial
+        litellm_params:
+          model: ollama/phi3-financial
+          api_base: http://ollama-secondary.ai.svc.cluster.local:11434
+      # llama3.2:3b on primary Ollama
+      - model_name: llama3.2:3b
+        litellm_params:
+          model: ollama/llama3.2:3b
+          api_base: http://ollama.ai.svc.cluster.local:11434
+      # llama3.2:3b on secondary Ollama
+      - model_name: llama3.2:3b
+        litellm_params:
+          model: ollama/llama3.2:3b
+          api_base: http://ollama-secondary.ai.svc.cluster.local:11434
+
+    router_settings:
+      routing_strategy: least-busy
+      num_retries: 2
+      timeout: 120
+
+    general_settings:
+      store_model_in_db: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: ai
+  labels:
+    app: litellm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: litellm
+          # Custom image: litellm-database base + Prisma binary cache copied to /prisma-cache
+          # (chmod 755 so UID 1000 can read it). The base image caches binaries under /root/.cache
+          # which is inaccessible to non-root. PRISMA_BINARY_CACHE_DIR baked into the image ENV
+          # points prisma-client-py to the pre-cached query-engine binary — no internet needed.
+          image: harbor.10.0.0.200.nip.io/library/litellm:1.90.3-prisma-v3
+          args:
+            - "--config"
+            - "/app/config.yaml"
+            - "--port"
+            - "4000"
+          ports:
+            - containerPort: 4000
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-credentials
+                  key: master-key
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-credentials
+                  key: database-url
+            - name: LITELLM_LOG
+              value: "INFO"
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 4000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 5
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 5
+            timeoutSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: ai
+  labels:
+    app: litellm
+spec:
+  type: ClusterIP
+  selector:
+    app: litellm
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000

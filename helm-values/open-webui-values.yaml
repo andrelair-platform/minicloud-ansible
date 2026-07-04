@@ -1,21 +1,28 @@
-# Open WebUI values for minicloud Phase 19.
-# Talks to the Ollama service we already installed (cluster-internal).
+# Open WebUI values — AI Gateway phase.
+# Routes through LiteLLM proxy (OpenAI-compatible) instead of direct Ollama.
+# Backed by PostgreSQL (ai namespace) instead of SQLite.
 
-# Disable the chart's bundled Ollama subchart — we have our own
-# (otwld/ollama installed separately in the same `ai` namespace).
 ollama:
   enabled: false
 
-# Point at the existing Ollama service via cluster DNS.
-ollamaUrls:
-  - http://ollama.ai.svc:11434
+# Disable direct Ollama URLs — LiteLLM is the only backend.
+ollamaUrls: []
+ollamaUrlsFromExtraEnv: false
 
-# Disable the Pipelines feature (extra plugins server) — not needed for
-# Phase 19. Adds memory + complexity if enabled.
+# LiteLLM AI Gateway endpoint (OpenAI-compatible API).
+openaiBaseApiUrl: "http://litellm.ai.svc.cluster.local:4000/v1"
+
+# OPENAI_API_KEY pulled from litellm-credentials Secret (ESO-synced from Vault).
+openaiApiKeyExistingSecret: "litellm-credentials"
+openaiApiKeyExistingSecretKey: "master-key"
+
+# PostgreSQL database URL constructed via chart's databaseUrl field.
+# Full URL with credentials embedded — secret is referenced via extraEnvVars.
+databaseUrl: ""
+
 pipelines:
   enabled: false
 
-# Disable RAG document parser sidecars — they're optional
 tika:
   enabled: false
 
@@ -31,9 +38,6 @@ resources:
     memory: 512Mi
   limits:
     cpu: 1000m
-    # Open WebUI bundles sentence-transformers and embedding models for
-    # RAG; startup needs 700-900 MiB before any chat traffic. 512 MiB
-    # OOMKills it during init. 1.5 GiB gives comfortable headroom.
     memory: 1500Mi
 
 containerSecurityContext:
@@ -41,15 +45,12 @@ containerSecurityContext:
   capabilities:
     drop: ["ALL"]
 
-# SQLite-backed (default) — no external Postgres needed for single-user demo.
-# Persistence holds chat history, RAG embeddings, user settings.
 persistence:
   enabled: true
   size: 5Gi
   storageClass: longhorn
   accessModes: [ReadWriteOnce]
 
-# Disable chart's Ingress — we add our own with cert-manager TLS.
 ingress:
   enabled: false
 
@@ -58,22 +59,11 @@ service:
   port: 80
   containerPort: 8080
 
-# Phase 23 Stage 5 — Authentik OIDC integration.
-# Open WebUI 0.4+ supports OAuth2/OIDC natively via env vars.
-# - OAUTH_CLIENT_ID + OAUTH_CLIENT_SECRET injected from the openwebui-oidc
-#   Secret (out-of-band, created via kubectl)
-# - OAUTH_PROVIDER_NAME determines the button label on the login page
-# - ENABLE_OAUTH_SIGNUP=true means SSO users get auto-provisioned
-#   accounts on first login (matches the "auto-onboard" pattern used by
-#   Harbor + Grafana)
-# - Local admin signup-flow is preserved as emergency fallback (the
-#   first-signed-up user is the admin; subsequent local signups require
-#   admin approval).
 extraEnvVars:
   - name: WEBUI_NAME
     value: "minicloud chat"
   - name: DEFAULT_MODELS
-    value: "phi3-financial:latest"
+    value: "phi3-financial"
   - name: ENABLE_API_KEY
     value: "true"
   - name: USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS
@@ -90,7 +80,6 @@ extraEnvVars:
     value: "https://auth.devandre.sbs/application/o/open-webui/.well-known/openid-configuration"
   - name: OAUTH_SCOPES
     value: "openid email profile groups"
-  # Optional: map Authentik 'authentik Admins' group claim -> Open WebUI admin role
   - name: ENABLE_OAUTH_ROLE_MANAGEMENT
     value: "true"
   - name: OAUTH_ROLES_CLAIM
@@ -99,19 +88,22 @@ extraEnvVars:
     value: "authentik Admins,Users"
   - name: OAUTH_ADMIN_ROLES
     value: "authentik Admins"
-  # Minicloud CA is not in the container's default trust store.
-  # SSL_CERT_FILE points to a combined bundle built by the init container below.
+  # DATABASE_URL via env var composition: PG_PASSWORD from ESO secret,
+  # rest of URL is static. Kubernetes substitutes $(PG_PASSWORD) at pod start.
+  - name: PG_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: ai-postgresql-secret
+        key: password
+  - name: DATABASE_URL
+    value: "postgresql://aiplatform:$(PG_PASSWORD)@postgresql-ai.ai.svc.cluster.local:5432/openwebui"
   - name: SSL_CERT_FILE
     value: /ca-bundle/bundle.crt
 
-# OAUTH_CLIENT_ID + OAUTH_CLIENT_SECRET come from this Secret
-# (created out-of-band so they don't live in this YAML or in git).
 extraEnvFrom:
   - secretRef:
       name: openwebui-oidc
 
-# Init container concatenates system CAs + minicloud CA into one bundle.
-# The main container inherits SSL_CERT_FILE pointing to it.
 extraInitContainers:
   - name: inject-minicloud-ca
     image: ghcr.io/open-webui/open-webui:0.9.4
