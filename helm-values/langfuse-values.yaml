@@ -58,7 +58,7 @@ postgresql:
     database: langfuse
     existingSecret: langfuse-secrets
     existingSecretKey:
-      userPasswordKey: db-password
+      userPasswordKey: password
 
 # ClickHouse — single-node (no HA, no Zookeeper)
 clickhouse:
