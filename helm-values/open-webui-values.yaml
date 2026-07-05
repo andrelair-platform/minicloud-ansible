@@ -63,7 +63,18 @@ extraEnvVars:
   - name: WEBUI_NAME
     value: "minicloud chat"
   - name: DEFAULT_MODELS
-    value: "phi3-financial"
+    value: "phi4-mini"
+  # ── Web Search (real-time internet via SearXNG) ─────────────────────
+  - name: ENABLE_WEB_SEARCH
+    value: "true"
+  - name: WEB_SEARCH_ENGINE
+    value: "searxng"
+  - name: SEARXNG_QUERY_URL
+    value: "http://searxng.searxng.svc.cluster.local:8080/search?q=<query>&format=json&language=auto"
+  - name: WEB_SEARCH_RESULT_COUNT
+    value: "5"
+  - name: WEB_SEARCH_CONCURRENT_REQUESTS
+    value: "10"
   - name: ENABLE_API_KEY
     value: "true"
   - name: USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS
@@ -97,6 +108,38 @@ extraEnvVars:
         key: password
   - name: DATABASE_URL
     value: "postgresql://aiplatform:$(PG_PASSWORD)@postgresql-ai.ai.svc.cluster.local:5432/openwebui"
+
+  # ── RAG / Vector Search (pgvector) ──────────────────────────────────────
+  # Vector store: pgvector on the existing postgresql-ai instance (ragdb database).
+  - name: VECTOR_DB
+    value: "pgvector"
+  - name: PGVECTOR_DB_URL
+    value: "postgresql://aiplatform:$(PG_PASSWORD)@postgresql-ai.ai.svc.cluster.local:5432/ragdb"
+  # Embedding model: nomic-embed-text via Ollama (274MB, 768-dim).
+  - name: RAG_EMBEDDING_ENGINE
+    value: "ollama"
+  - name: RAG_EMBEDDING_MODEL
+    value: "nomic-embed-text"
+  - name: RAG_OLLAMA_BASE_URL
+    value: "http://ollama.ai.svc.cluster.local:11434"
+  - name: CHUNK_SIZE
+    value: "1500"
+  - name: CHUNK_OVERLAP
+    value: "200"
+  - name: RAG_TOP_K
+    value: "5"
+  - name: ENABLE_RAG_HYBRID_SEARCH
+    value: "true"
+  - name: VECTOR_LENGTH
+    value: "768"
+  - name: PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH
+    value: "768"
+  - name: PGVECTOR_INDEX_METHOD
+    value: "hnsw"
+  - name: PGVECTOR_HNSW_M
+    value: "16"
+  - name: PGVECTOR_HNSW_EF_CONSTRUCTION
+    value: "64"
   - name: SSL_CERT_FILE
     value: /ca-bundle/bundle.crt
 
