@@ -134,6 +134,13 @@ extraEnvVars:
     value: "5"
   - name: ENABLE_RAG_HYBRID_SEARCH
     value: "true"
+  # ── Re-ranking (cross-encoder) ───────────────────────────────────────
+  - name: RAG_RERANKING_ENGINE
+    value: "sentence_transformers"
+  - name: RAG_RERANKING_MODEL
+    value: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  - name: RAG_TOP_K_RERANKER
+    value: "3"
   - name: VECTOR_LENGTH
     value: "768"
   - name: PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH
