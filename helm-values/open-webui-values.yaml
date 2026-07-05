@@ -75,6 +75,10 @@ extraEnvVars:
     value: "5"
   - name: WEB_SEARCH_CONCURRENT_REQUESTS
     value: "10"
+  # Skip full-page scraping — use SearXNG snippets directly.
+  # Many sites (FIFA, BBC, etc.) block scrapers; snippets are sufficient for LLM context.
+  - name: BYPASS_WEB_SEARCH_WEB_LOADER
+    value: "true"
   - name: ENABLE_API_KEY
     value: "true"
   - name: USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS
