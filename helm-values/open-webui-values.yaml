@@ -185,6 +185,25 @@ extraInitContainers:
         mountPath: /minicloud-ca
       - name: ca-bundle
         mountPath: /ca-bundle
+  # Copies utils.py from the image, applies French BM25 stemmer patch,
+  # writes result to patched-retrieval emptyDir. Main container mounts it
+  # via subPath, shadowing the original file.
+  - name: patch-bm25-french
+    image: ghcr.io/open-webui/open-webui:0.9.4
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        cp /app/backend/open_webui/retrieval/utils.py /patched/utils.py
+        python3 /scripts/patch_bm25_french.py
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    volumeMounts:
+      - name: bm25-french-patchscript
+        mountPath: /scripts
+      - name: patched-retrieval
+        mountPath: /patched
 
 volumes:
   - name: minicloud-ca
@@ -192,11 +211,20 @@ volumes:
       name: minicloud-ca
   - name: ca-bundle
     emptyDir: {}
+  - name: bm25-french-patchscript
+    configMap:
+      name: bm25-french-patchscript
+  - name: patched-retrieval
+    emptyDir: {}
 
 volumeMounts:
   container:
     - name: ca-bundle
       mountPath: /ca-bundle
+    # Shadow the original utils.py with the French-patched version
+    - name: patched-retrieval
+      mountPath: /app/backend/open_webui/retrieval/utils.py
+      subPath: utils.py
   initContainer:
     - name: minicloud-ca
       mountPath: /minicloud-ca
