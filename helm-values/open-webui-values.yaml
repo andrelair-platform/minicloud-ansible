@@ -119,11 +119,11 @@ extraEnvVars:
     value: "pgvector"
   - name: PGVECTOR_DB_URL
     value: "postgresql://aiplatform:$(PG_PASSWORD)@postgresql-ai.ai.svc.cluster.local:5432/ragdb"
-  # Embedding model: nomic-embed-text via Ollama (274MB, 768-dim).
+  # Embedding model: bge-m3 via Ollama (1024-dim, 100+ languages, strong French/multilingual).
   - name: RAG_EMBEDDING_ENGINE
     value: "ollama"
   - name: RAG_EMBEDDING_MODEL
-    value: "nomic-embed-text"
+    value: "bge-m3"
   - name: RAG_OLLAMA_BASE_URL
     value: "http://ollama.ai.svc.cluster.local:11434"
   - name: CHUNK_SIZE
@@ -131,12 +131,11 @@ extraEnvVars:
   - name: CHUNK_OVERLAP
     value: "200"
   - name: RAG_TOP_K
-    value: "5"
+    value: "8"
   - name: ENABLE_RAG_HYBRID_SEARCH
     value: "true"
-  # pgvector native hybrid search: vector (HNSW) + PostgreSQL FTS (GIN-indexed).
-  # 0.5 = equal weight; raise toward 1.0 for keyword-heavy queries (exact terms),
-  # lower toward 0.0 for purely semantic questions. 0.5 is balanced for insurance docs.
+  # Hybrid: HNSW vector search (pgvector) + Python BM25Retriever (rank_bm25), merged via RRF.
+  # 0.5 = equal weight; raise toward 1.0 for exact-term queries, lower for semantic questions.
   - name: RAG_HYBRID_BM25_WEIGHT
     value: "0.5"
   # ── Document extraction (Docling OCR) ───────────────────────────────
@@ -154,9 +153,9 @@ extraEnvVars:
   - name: RAG_TOP_K_RERANKER
     value: "3"
   - name: VECTOR_LENGTH
-    value: "768"
+    value: "1024"
   - name: PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH
-    value: "768"
+    value: "1024"
   - name: PGVECTOR_INDEX_METHOD
     value: "hnsw"
   - name: PGVECTOR_HNSW_M
