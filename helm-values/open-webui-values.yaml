@@ -144,7 +144,7 @@ extraEnvVars:
   - name: CONTENT_EXTRACTION_ENGINE
     value: "docling"
   - name: DOCLING_SERVER_URL
-    value: "http://docling.ai.svc.cluster.local:5001"
+    value: "http://markitdown-proxy.ai.svc.cluster.local:8000"
   # ── Re-ranking (cross-encoder) ───────────────────────────────────────
   - name: RAG_RERANKING_ENGINE
     value: "sentence_transformers"

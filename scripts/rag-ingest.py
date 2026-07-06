@@ -2,17 +2,18 @@
 """
 rag-ingest.py — Structure-aware RAG ingestion pipeline for minicloud.
 
-Routes documents through Docling (PDF/scanned) or MarkItDown (Office formats),
-splits at structural boundaries (Article/Annexe/Chapitre/Section), attaches
-rich insurance metadata, embeds via bge-m3 on Ollama, and stores directly in
-ragdb.document_chunk so Open WebUI can query the chunks.
+Sends every document through the markitdown-proxy cluster service, which
+internally routes PDFs to Docling (OCR + layout) and Office/HTML formats
+to MarkItDown. The script handles structural chunking, metadata, embedding,
+and direct pgvector storage — same pipeline as the Open WebUI paperclip
+path, but with article/section-level splitting and rich metadata.
 
 Usage
 -----
-  # 1. Activate port-forwards (run each in a separate terminal or background them)
-  kubectl port-forward -n ai svc/docling    5001:5001 &
-  kubectl port-forward -n ai svc/ollama     11434:11434 &
-  kubectl port-forward -n ai postgresql-ai-0 5432:5432 &
+  # 1. Activate port-forwards (run each in a separate terminal or background)
+  kubectl port-forward -n ai svc/markitdown-proxy 8100:8000 &
+  kubectl port-forward -n ai svc/ollama           11434:11434 &
+  kubectl port-forward -n ai postgresql-ai-0      5432:5432 &
 
   # 2. Get the PostgreSQL password
   PG_PASS=$(kubectl get secret -n ai ai-postgresql-secret \
@@ -29,10 +30,15 @@ Usage
     --source "Contrat RC Pro 2026" \\
     --pg-pass "$PG_PASS"
 
+Supported formats (all routed through the cluster proxy):
+  PDF, PNG, JPG, TIFF        → markitdown-proxy → Docling (OCR + layout)
+  DOCX, XLSX, PPTX, HTML     → markitdown-proxy → MarkItDown (structure-aware)
+  TXT, MD                    → markitdown-proxy → MarkItDown (direct)
+
 Dependencies
 ------------
-  pip install requests psycopg2-binary markitdown
-  (Docling and Ollama are accessed via HTTP — no local install needed)
+  pip install requests psycopg2-binary
+  (no local markitdown install needed — conversion happens in the cluster)
 """
 
 import argparse
@@ -47,7 +53,7 @@ import psycopg2
 import requests
 
 # ── Defaults (override via env vars or CLI flags) ──────────────────────────────
-DOCLING_URL  = os.getenv("DOCLING_URL",  "http://localhost:5001")
+PROXY_URL    = os.getenv("PROXY_URL",    "http://localhost:8100")
 OLLAMA_URL   = os.getenv("OLLAMA_URL",   "http://localhost:11434")
 PG_HOST      = os.getenv("PG_HOST",      "localhost")
 PG_PORT      = int(os.getenv("PG_PORT",  "5432"))
@@ -69,54 +75,27 @@ HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Also treat markdown headings as structural breaks even without keywords
 MD_HEADING_RE = re.compile(r'^#{1,3}\s+.+', re.MULTILINE)
 
-MAX_CHUNK_CHARS = 2000  # fallback split threshold if a structural section is huge
+MAX_CHUNK_CHARS = 2000
 
 
-# ── Conversion ─────────────────────────────────────────────────────────────────
+# ── Conversion (via cluster proxy) ────────────────────────────────────────────
 
 def convert_to_markdown(file_path: Path) -> str:
-    """Route to Docling (PDF) or MarkItDown (Office) based on extension."""
-    suffix = file_path.suffix.lower()
-
-    if suffix == ".pdf":
-        return _docling_convert(file_path)
-
-    if suffix in {".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".html", ".htm"}:
-        return _markitdown_convert(file_path)
-
-    if suffix in {".txt", ".md"}:
-        return file_path.read_text(encoding="utf-8")
-
-    raise ValueError(f"Unsupported format: {suffix}. Add to the router if needed.")
-
-
-def _docling_convert(file_path: Path) -> str:
-    print(f"  → Docling: converting {file_path.name}...")
+    """Send the file to markitdown-proxy; it routes PDF→Docling, Office→MarkItDown."""
+    print(f"  → markitdown-proxy: converting {file_path.name} ...")
     with open(file_path, "rb") as f:
         resp = requests.post(
-            f"{DOCLING_URL}/v1/convert/file",
-            files={"file": (file_path.name, f, "application/pdf")},
+            f"{PROXY_URL}/v1/convert/file",
+            files={"file": (file_path.name, f, "application/octet-stream")},
             timeout=300,
         )
     resp.raise_for_status()
     data = resp.json()
     md = data.get("document", {}).get("md_content") or data.get("content", "")
     if not md:
-        raise RuntimeError(f"Docling returned no content: {data}")
-    print(f"     {len(md):,} chars of markdown")
-    return md
-
-
-def _markitdown_convert(file_path: Path) -> str:
-    print(f"  → MarkItDown: converting {file_path.name}...")
-    try:
-        from markitdown import MarkItDown
-    except ImportError:
-        raise ImportError("Install markitdown: pip install markitdown")
-    md = MarkItDown().convert(str(file_path)).text_content
+        raise RuntimeError(f"Proxy returned no content: {data}")
     print(f"     {len(md):,} chars of markdown")
     return md
 
@@ -152,11 +131,9 @@ def chunk_by_structure(markdown: str, source: str, doc_type: str, extra_meta: di
     for heading, text in sections:
         if not text:
             continue
-        # If the section is small enough, keep it whole
         if len(text) <= MAX_CHUNK_CHARS:
             chunks.append(_make_chunk(text, heading, source, doc_type, extra_meta))
         else:
-            # Fallback: split large sections on paragraph boundaries
             paragraphs = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
             buffer = ""
             for para in paragraphs:
@@ -173,7 +150,6 @@ def chunk_by_structure(markdown: str, source: str, doc_type: str, extra_meta: di
 
 
 def _make_chunk(text: str, section: str, source: str, doc_type: str, extra_meta: dict) -> dict:
-    # Extract article number from section heading if present
     article_match = re.search(
         r'(Article|Annexe|Section|Chapitre)\s+([\dA-Za-z]+(?:[.\-]\d+)*)',
         section, re.IGNORECASE
@@ -206,7 +182,7 @@ def embed(text: str) -> list[float]:
 
 # ── Storage ────────────────────────────────────────────────────────────────────
 
-def store_chunks(chunks: list[dict], collection: str, pg_pass: str):
+def store_chunks(chunks: list[dict], collection: str, pg_pass: str) -> int:
     conn = psycopg2.connect(
         host=PG_HOST, port=PG_PORT, dbname=PG_DB,
         user=PG_USER, password=pg_pass,
@@ -263,7 +239,7 @@ def main():
     if args.page:
         extra_meta["page_start"] = args.page
 
-    print(f"\n[1/4] Converting {file_path.name}")
+    print(f"\n[1/4] Converting {file_path.name}  (via markitdown-proxy)")
     markdown = convert_to_markdown(file_path)
 
     print(f"\n[2/4] Chunking by document structure")
@@ -278,7 +254,7 @@ def main():
     inserted = store_chunks(chunks, args.collection, args.pg_pass)
 
     print(f"\n[4/4] Done — {inserted} chunks stored")
-    print(f"      In Open WebUI: open the Knowledge Base, it will query these chunks automatically.")
+    print(f"      Open the Knowledge Base in Open WebUI to query these chunks.")
     print(f"\nMetadata sample:")
     print(json.dumps(chunks[0]["metadata"], ensure_ascii=False, indent=2))
 
