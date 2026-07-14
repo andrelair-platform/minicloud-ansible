@@ -1,0 +1,79 @@
+---
+## Version-specific settings that override the values in cfg/config.yaml
+
+master:
+  components:
+    - apiserver
+    - kubelet
+    - scheduler
+    - controllermanager
+    - etcd
+    - policies
+
+  apiserver:
+    bins:
+      - containerd
+
+  kubelet:
+    bins:
+      - containerd
+    defaultkubeconfig: /var/lib/rancher/k3s/agent/kubelet.kubeconfig
+    defaultcafile: /var/lib/rancher/k3s/agent/client-ca.crt
+
+  scheduler:
+    bins:
+      - containerd
+
+  controllermanager:
+    bins:
+      - containerd
+
+  etcd:
+    bins:
+      - containerd
+    datadirs:
+      - /var/lib/rancher/k3s/server/db/etcd
+  node:
+    components:
+      - kubelet
+      - proxy
+
+    kubelet:
+      bins:
+        - k3s-agent
+        - k3s
+        - containerd
+      defaultkubeconfig: /var/lib/rancher/k3s/agent/kubelet.kubeconfig
+      defaultcafile: /var/lib/rancher/k3s/agent/client-ca.crt
+      confs:
+        - /var/lib/kubelet/config.yaml
+      defaultconf: /var/lib/kubelet/config.yaml
+
+    proxy:
+      bins:
+        - containerd
+      defaultkubeconfig: /var/lib/rancher/k3s/agent/kubeproxy.kubeconfig
+
+  policies:
+    components:
+      - policies
+
+# Top-level node section — overrides the global config.yaml node.kubelet.bins so
+# kube-bench can find the k3s process on worker nodes (process name is k3s-agent,
+# not kubelet or hyperkube). Without this, $kubeletbin stays unsubstituted and all
+# 4.2.x audit commands that use it fail with exit 1 before audit_config is evaluated.
+node:
+  kubelet:
+    bins:
+      - k3s-agent
+      - k3s
+      - containerd
+    defaultkubeconfig: /var/lib/rancher/k3s/agent/kubelet.kubeconfig
+    defaultcafile: /var/lib/rancher/k3s/agent/client-ca.crt
+    confs:
+      - /var/lib/kubelet/config.yaml
+    defaultconf: /var/lib/kubelet/config.yaml
+  proxy:
+    bins:
+      - containerd
+    defaultkubeconfig: /var/lib/rancher/k3s/agent/kubeproxy.kubeconfig
