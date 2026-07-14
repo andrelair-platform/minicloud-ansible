@@ -52,6 +52,7 @@ prometheus:
         secretName: prometheus-tls
   prometheusSpec:
     retention: 10d
+    retentionSize: 27GB
     resources:
       requests:
         cpu: 500m
@@ -66,10 +67,17 @@ prometheus:
           accessModes: [ReadWriteOnce]
           resources:
             requests:
-              storage: 15Gi
+              storage: 30Gi
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
+    additionalScrapeConfigs:
+      - job_name: controller-node
+        static_configs:
+          - targets: ['10.0.0.1:9100']
+            labels:
+              instance: controller
+              node: ktayl-ThinkPad-X390
 
 alertmanager:
   ingress:
@@ -171,6 +179,8 @@ alertmanager:
               storage: 1Gi
 
 grafana:
+  podLabels:
+    backstage.io/kubernetes-id: grafana
   admin:
     existingSecret: grafana-admin-credentials
     userKey: admin-user
@@ -184,6 +194,10 @@ grafana:
   grafana.ini:
     server:
       root_url: https://grafana.devandre.sbs
+    auth.anonymous:
+      enabled: true
+      org_name: Main Org.
+      org_role: Viewer
     auth.generic_oauth:
       enabled: true
       name: Authentik
@@ -192,9 +206,9 @@ grafana:
       auto_login: false
       # client_id + client_secret injected via env vars from the
       # grafana-oidc Secret (see envFromSecret below).
-      auth_url: https://auth.10.0.0.200.nip.io/application/o/authorize/
-      token_url: https://auth.10.0.0.200.nip.io/application/o/token/
-      api_url: https://auth.10.0.0.200.nip.io/application/o/userinfo/
+      auth_url: https://auth.devandre.sbs/application/o/authorize/
+      token_url: https://auth.devandre.sbs/application/o/token/
+      api_url: https://auth.devandre.sbs/application/o/userinfo/
       tls_skip_verify_insecure: true
       scopes: openid profile email groups
       use_pkce: true
@@ -208,6 +222,11 @@ grafana:
         || 'Viewer'
       role_attribute_strict: false
   envFromSecret: grafana-oidc
+  envValueFrom:
+    GF_LITELLM_PG_PASSWORD:
+      secretKeyRef:
+        name: grafana-litellm-db
+        key: password
   resources:
     requests:
       cpu: 100m
@@ -259,6 +278,20 @@ grafana:
       jsonData:
         maxLines: 1000
         timeout: 60
+    - name: LiteLLM PostgreSQL
+      uid: litellm-postgres
+      type: postgres
+      access: proxy
+      url: postgresql-ai.ai.svc.cluster.local:5432
+      user: aiplatform
+      isDefault: false
+      editable: false
+      secureJsonData:
+        password: "${GF_LITELLM_PG_PASSWORD}"
+      jsonData:
+        database: litellm
+        sslmode: disable
+        postgresVersion: 1400
 
 kubeEtcd:
   enabled: false

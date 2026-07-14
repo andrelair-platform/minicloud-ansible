@@ -11,8 +11,8 @@ backstage:
     # Phase 24 custom image — built from andrelair-platform/minicloud-backstage
     registry: harbor.10.0.0.200.nip.io
     repository: library/backstage
-    # git SHA: bcec03f — built 2026-06-20
-    tag: "bcec03f-amd64"
+    # git SHA: 4211d11 — built 2026-07-10 by CI
+    tag: "4211d11-amd64"
 
   resources:
     requests: { cpu: 100m, memory: 384Mi }
@@ -27,20 +27,26 @@ backstage:
   containerPorts:
     backend: 7007
 
-  # Inline app-config — guest auth + 5 catalog locations targeting our
+  # Inline app-config — OIDC via Authentik + catalog locations targeting our
   # GitHub repos. Each repo has a catalog-info.yaml at its root.
+  # Primary URL is devandre.sbs (public via Cloudflare Tunnel).
   appConfig:
     app:
       title: minicloud platform
-      baseUrl: https://backstage.10.0.0.200.nip.io
+      baseUrl: https://backstage.devandre.sbs
+      # Map the catalog page to the root so the user lands on /catalog after login
+      extensions:
+        - page:catalog:
+            config:
+              path: /
     organization:
       name: andrelair-platform
     backend:
-      baseUrl: https://backstage.10.0.0.200.nip.io
+      baseUrl: https://backstage.devandre.sbs
       listen:
         port: 7007
       cors:
-        origin: https://backstage.10.0.0.200.nip.io
+        origin: https://backstage.devandre.sbs
         methods: [GET, POST, PUT, DELETE]
         credentials: true
       # URL whitelist for catalog locations and other reading. Without
@@ -49,6 +55,8 @@ backstage:
         allow:
           - host: raw.githubusercontent.com
           - host: github.com
+      csp:
+        connect-src: ["'self'", 'https://raw.githubusercontent.com']
       database:
         client: pg
         connection:
@@ -65,10 +73,10 @@ backstage:
       providers:
         oidc:
           production:
-            metadataUrl: https://auth.10.0.0.200.nip.io/application/o/backstage/.well-known/openid-configuration
+            metadataUrl: https://auth.devandre.sbs/application/o/backstage/.well-known/openid-configuration
             clientId: ${AUTH_OIDC_CLIENT_ID}
             clientSecret: ${AUTH_OIDC_CLIENT_SECRET}
-            callbackUrl: https://backstage.10.0.0.200.nip.io/api/auth/oidc/handler/frame
+            callbackUrl: https://backstage.devandre.sbs/api/auth/oidc/handler/frame
             additionalScopes: []
             signIn:
               resolvers:
@@ -76,7 +84,7 @@ backstage:
                 - resolver: emailLocalPartMatchingUserEntityName
     catalog:
       rules:
-        - allow: [Component, System, API, Resource, Location]
+        - allow: [Component, System, API, Resource, Location, User, Group]
       locations:
         # Use raw.githubusercontent.com for direct (anonymous, no rate-limit
         # surprises) file fetches. Backstage's `url` location reader handles
@@ -93,8 +101,19 @@ backstage:
           target: https://raw.githubusercontent.com/andrelair-platform/platform-demo/main/catalog-info.yaml
         - type: url
           target: https://raw.githubusercontent.com/andrelair-platform/minicloud-backstage/main/catalog-info.yaml
+        - type: url
+          target: https://raw.githubusercontent.com/andrelair-platform/minicloud-markitdown-proxy/main/catalog-info.yaml
+        - type: url
+          target: https://raw.githubusercontent.com/andrelair-platform/minicloud-rag-ingest/main/catalog-info.yaml
+        - type: url
+          target: https://raw.githubusercontent.com/andrelair-platform/minicloud-postgresql-noavx512/main/catalog-info.yaml
+        - type: url
+          target: https://raw.githubusercontent.com/andrelair-platform/minicloud-litellm-custom/main/catalog-info.yaml
+    techRadar:
+      url: https://raw.githubusercontent.com/andrelair-platform/minicloud-gitops/main/tech-radar.json
+
     grafana:
-      domain: https://grafana.10.0.0.200.nip.io
+      domain: https://grafana.devandre.sbs
     kubernetes:
       serviceLocatorMethod:
         type: 'multiTenant'
@@ -114,20 +133,30 @@ backstage:
         - type: 'config'
           instances:
             - name: minicloud
-              url: https://argocd.10.0.0.200.nip.io
+              url: https://argocd.devandre.sbs
+
+  extraAppConfig:
+    - filename: app-config.session.yaml
+      configMapRef: backstage-session-config
+
+  extraVolumes:
+    - name: minicloud-ca
+      configMap:
+        name: minicloud-ca
+
+  extraVolumeMounts:
+    - name: minicloud-ca
+      mountPath: /ca
+      readOnly: true
 
   extraEnvVars:
-    - name: POSTGRES_HOST
-      value: backstage-postgresql
-    - name: POSTGRES_PORT
-      value: "5432"
-    - name: POSTGRES_USER
-      value: bn_backstage
-    - name: POSTGRES_PASSWORD
+    - name: NODE_EXTRA_CA_CERTS
+      value: /ca/ca.crt
+    - name: SESSION_SECRET
       valueFrom:
         secretKeyRef:
-          name: backstage-postgres-secret
-          key: password
+          name: backstage-phase24-secret
+          key: session-secret
     - name: K8S_SA_TOKEN
       valueFrom:
         secretKeyRef:
