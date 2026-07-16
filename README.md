@@ -1,6 +1,10 @@
 # minicloud — Ansible
 
-Codifies the **post-MAAS, pre-k3s node bootstrap** for the 3-node minicloud
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Ansible](https://img.shields.io/badge/ansible--core-%E2%89%A52.18-red)](https://docs.ansible.com)
+[![Live docs](https://img.shields.io/badge/docs-live-blue)](https://andrelair-platform.github.io/minicloud-platform-docs/)
+
+Codifies the **post-MAAS, pre-k3s node bootstrap** for the minicloud
 cluster, plus a rolling-upgrade playbook for Day-2 maintenance.
 
 This repo is *not* responsible for installing k3s. The cluster is live and
@@ -18,6 +22,19 @@ upgrade playbook.
 [opentofu](https://github.com/andrelair-platform/minicloud-opentofu) ·
 [gitops](https://github.com/andrelair-platform/minicloud-gitops) ·
 [platform-demo](https://github.com/andrelair-platform/platform-demo)
+
+---
+
+## Table of Contents
+
+- [Layout](#layout)
+- [Prerequisites](#prerequisites)
+- [Verify connectivity](#verify-connectivity)
+- [Bootstrap a node](#bootstrap-a-node-or-check-current-state)
+- [Day-2: rolling apt upgrade](#day-2-rolling-apt-upgrade)
+- [Why no k3s install task](#why-no-k3s-install-task)
+- [Adding a new role](#adding-a-new-role)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
