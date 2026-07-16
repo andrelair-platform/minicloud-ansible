@@ -1,0 +1,203 @@
+---
+# install-k3s.yml — Day-0 cluster bootstrap
+#
+# Installs k3s on the control plane then on all worker nodes.
+# Safe to re-run: skips nodes where k3s is already installed.
+#
+# Pre-flight checklist:
+#   1. All nodes must be reachable via SSH (MAAS provisioned + cloud-init done)
+#   2. swift-mac must have Ubuntu installed manually (Apple EFI blocks PXE)
+#   3. Tailscale must be up on the controller so the Mac can reach 10.0.0.x
+#
+# Usage:
+#   # Dry run (show what would happen):
+#   ansible-playbook playbooks/install-k3s.yml --check
+#
+#   # Full install:
+#   ansible-playbook playbooks/install-k3s.yml
+#
+#   # Pin a different k3s version:
+#   ansible-playbook playbooks/install-k3s.yml -e k3s_version=v1.37.0+k3s1
+#
+#   # Install only workers (control plane already up):
+#   ansible-playbook playbooks/install-k3s.yml --tags workers
+#
+# After the playbook:
+#   1. Kubeconfig is fetched to /tmp/minicloud.yaml (patched server IP)
+#   2. Copy to controller:  scp /tmp/minicloud.yaml controller:~/.kube/minicloud.yaml
+#   3. Verify:              ssh controller "kubectl --kubeconfig ~/.kube/minicloud.yaml get nodes"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 1 — Install k3s server on the control plane (set-hog)
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Install k3s control plane
+  hosts: control_plane
+  gather_facts: true
+  become: true
+  tags: [control-plane]
+
+  vars:
+    k3s_version: "v1.36.2+k3s1"
+
+  tasks:
+    - name: Check if k3s is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Install k3s server
+      ansible.builtin.shell:
+        cmd: "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} sh -"
+      when: not k3s_binary.stat.exists
+      changed_when: true
+
+    - name: Enable and start k3s service
+      ansible.builtin.systemd:
+        name: k3s
+        enabled: true
+        state: started
+
+    - name: Wait for k3s API server to be ready (port 6443)
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 6443
+        timeout: 120
+
+    - name: Wait for control plane node to be Ready
+      ansible.builtin.command:
+        cmd: k3s kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=120s
+      changed_when: false
+      retries: 3
+      delay: 10
+
+    - name: Read node-token (needed by workers to join)
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_node_token
+
+    - name: Show cluster info
+      ansible.builtin.command: k3s kubectl get nodes -o wide
+      changed_when: false
+      register: cluster_info
+
+    - name: Print cluster info
+      ansible.builtin.debug:
+        msg: "{{ cluster_info.stdout_lines }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 2 — Install k3s agent on each worker node
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Install k3s agents on workers
+  hosts: workers
+  gather_facts: true
+  become: true
+  serial: 1            # join one worker at a time to avoid thundering herd
+  tags: [workers]
+
+  vars:
+    k3s_version: "v1.36.2+k3s1"
+    k3s_server_url: "https://{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:6443"
+    k3s_token: "{{ hostvars[groups['control_plane'][0]]['k3s_node_token']['content'] | b64decode | trim }}"
+
+  tasks:
+    - name: Check if k3s agent is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Install k3s agent
+      ansible.builtin.shell:
+        cmd: >
+          curl -sfL https://get.k3s.io |
+          INSTALL_K3S_VERSION={{ k3s_version }}
+          K3S_URL={{ k3s_server_url }}
+          K3S_TOKEN={{ k3s_token }} sh -
+      when: not k3s_binary.stat.exists
+      changed_when: true
+
+    - name: Enable and start k3s-agent service
+      ansible.builtin.systemd:
+        name: k3s-agent
+        enabled: true
+        state: started
+
+    - name: Wait for this worker to appear as Ready in the cluster
+      ansible.builtin.command:
+        cmd: k3s kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=120s
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      become: true
+      changed_when: false
+      retries: 3
+      delay: 10
+
+    - name: Print updated node list
+      ansible.builtin.command:
+        cmd: k3s kubectl get nodes -o wide
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      become: true
+      changed_when: false
+      register: nodes_after
+
+    - name: Show nodes
+      ansible.builtin.debug:
+        msg: "{{ nodes_after.stdout_lines }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 3 — Fetch kubeconfig and patch it for external access
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Configure kubeconfig for external kubectl access
+  hosts: control_plane
+  gather_facts: false
+  become: true
+  tags: [kubeconfig]
+
+  vars:
+    control_plane_ip: "{{ hostvars[inventory_hostname]['ansible_host'] }}"
+
+  tasks:
+    - name: Fetch raw kubeconfig from control plane
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /tmp/k3s-raw.yaml
+        flat: true
+
+    - name: Patch server URL (127.0.0.1 → real control-plane IP)
+      ansible.builtin.replace:
+        path: /tmp/k3s-raw.yaml
+        regexp: 'server: https://127\.0\.0\.1:6443'
+        replace: 'server: https://{{ control_plane_ip }}:6443'
+      delegate_to: localhost
+      become: false
+
+    - name: Set context name to minicloud
+      ansible.builtin.replace:
+        path: /tmp/k3s-raw.yaml
+        regexp: 'name: default'
+        replace: 'name: minicloud'
+      delegate_to: localhost
+      become: false
+
+    - name: Set cluster name to minicloud
+      ansible.builtin.replace:
+        path: /tmp/k3s-raw.yaml
+        regexp: 'cluster: default'
+        replace: 'cluster: minicloud'
+      delegate_to: localhost
+      become: false
+
+    - name: Save patched kubeconfig to /tmp/minicloud.yaml
+      ansible.builtin.copy:
+        src: /tmp/k3s-raw.yaml
+        dest: /tmp/minicloud.yaml
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Print next steps
+      ansible.builtin.debug:
+        msg:
+          - "Kubeconfig saved to /tmp/minicloud.yaml"
+          - "Copy to controller: scp /tmp/minicloud.yaml controller:~/.kube/minicloud.yaml"
+          - "Verify: ssh controller 'kubectl --kubeconfig ~/.kube/minicloud.yaml get nodes'"
+      delegate_to: localhost
+      become: false
