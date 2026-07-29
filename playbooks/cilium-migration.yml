@@ -4,7 +4,7 @@
 # Prerequisites (complete before running this playbook):
 #   1. Cilium Helm chart deployed via ArgoCD (apps/cilium.yaml synced manually).
 #      Cilium DaemonSet pods must be Running on all nodes before proceeding.
-#      Verify: kubectl get pods -n kube-system -l app.kubernetes.io/name=cilium
+#      Verify: kubectl get pods -n kube-system -l k8s-app=cilium
 #   2. CiliumLoadBalancerIPPool and CiliumL2AnnouncementPolicy applied:
 #      kubectl apply -f manifests/cilium/
 #   3. MetalLB still running — do not remove it until Phase 4 (post-migration).
@@ -40,7 +40,7 @@
       ansible.builtin.command:
         cmd: >
           kubectl --context minicloud-break-glass get pod -n kube-system
-          -l app.kubernetes.io/name=cilium
+          -l k8s-app=cilium
           --field-selector spec.nodeName={{ inventory_hostname }}
           -o jsonpath='{.items[0].status.phase}'
       register: cilium_phase
@@ -133,7 +133,7 @@
       ansible.builtin.command:
         cmd: >
           kubectl --context minicloud-break-glass get pod -n kube-system
-          -l app.kubernetes.io/name=cilium
+          -l k8s-app=cilium
           --field-selector spec.nodeName={{ inventory_hostname }}
           -o jsonpath='{.items[0].status.phase}'
       register: cilium_phase_cp
