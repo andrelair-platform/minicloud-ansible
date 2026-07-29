@@ -39,7 +39,7 @@
       become: false
       ansible.builtin.command:
         cmd: >
-          kubectl get pod -n kube-system
+          kubectl --context minicloud get pod -n kube-system
           -l app.kubernetes.io/name=cilium
           --field-selector spec.nodeName={{ inventory_hostname }}
           -o jsonpath='{.items[0].status.phase}'
@@ -53,7 +53,7 @@
       become: false
       ansible.builtin.command:
         cmd: >
-          kubectl drain {{ inventory_hostname }}
+          kubectl --context minicloud drain {{ inventory_hostname }}
           --ignore-daemonsets
           --delete-emptydir-data
           --timeout=5m
@@ -90,7 +90,7 @@
       become: false
       ansible.builtin.command:
         cmd: >
-          kubectl get ciliumnode {{ inventory_hostname }}
+          kubectl --context minicloud get ciliumnode {{ inventory_hostname }}
           -o jsonpath='{.status.cilium.state}'
       register: cilium_state
       retries: 20
@@ -102,7 +102,7 @@
       delegate_to: localhost
       become: false
       ansible.builtin.command:
-        cmd: kubectl uncordon {{ inventory_hostname }}
+        cmd: kubectl --context minicloud uncordon {{ inventory_hostname }}
       changed_when: true
 
     - name: Pause 15 seconds before next node
@@ -122,7 +122,7 @@
       become: false
       ansible.builtin.command:
         cmd: >
-          kubectl get nodes -l '!node-role.kubernetes.io/control-plane'
+          kubectl --context minicloud get nodes -l '!node-role.kubernetes.io/control-plane'
           -o jsonpath='{range .items[*]}{.metadata.name}={.spec.taints}{"\n"}{end}'
       register: worker_taint_check
       changed_when: false
@@ -132,7 +132,7 @@
       become: false
       ansible.builtin.command:
         cmd: >
-          kubectl get pod -n kube-system
+          kubectl --context minicloud get pod -n kube-system
           -l app.kubernetes.io/name=cilium
           --field-selector spec.nodeName={{ inventory_hostname }}
           -o jsonpath='{.items[0].status.phase}'
@@ -146,7 +146,7 @@
       become: false
       ansible.builtin.command:
         cmd: >
-          kubectl drain {{ inventory_hostname }}
+          kubectl --context minicloud drain {{ inventory_hostname }}
           --ignore-daemonsets
           --delete-emptydir-data
           --timeout=5m
@@ -171,7 +171,7 @@
       delegate_to: localhost
       become: false
       ansible.builtin.command:
-        cmd: kubectl get nodes {{ inventory_hostname }}
+        cmd: kubectl --context minicloud get nodes {{ inventory_hostname }}
       register: node_check
       retries: 30
       delay: 10
@@ -190,7 +190,7 @@
       become: false
       ansible.builtin.command:
         cmd: >
-          kubectl get ciliumnode {{ inventory_hostname }}
+          kubectl --context minicloud get ciliumnode {{ inventory_hostname }}
           -o jsonpath='{.status.cilium.state}'
       register: cilium_state_cp
       retries: 20
@@ -202,7 +202,7 @@
       delegate_to: localhost
       become: false
       ansible.builtin.command:
-        cmd: kubectl uncordon {{ inventory_hostname }}
+        cmd: kubectl --context minicloud uncordon {{ inventory_hostname }}
       changed_when: true
 
 
@@ -214,13 +214,13 @@
   tasks:
     - name: Verify all nodes are Ready and on Cilium
       ansible.builtin.command:
-        cmd: kubectl get ciliumnode -o wide
+        cmd: kubectl --context minicloud get ciliumnode -o wide
       changed_when: false
 
     - name: Verify LoadBalancer VIP is still reachable via Cilium L2 announcement
       ansible.builtin.command:
         cmd: >
-          kubectl get svc -A -o jsonpath=
+          kubectl --context minicloud get svc -A -o jsonpath=
           '{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name}
            IP={.status.loadBalancer.ingress[0].ip}{"\n"}{end}'
       changed_when: false
@@ -238,17 +238,17 @@
 
     - name: Remove MetalLB CRs (IPAddressPool + L2Advertisement)
       ansible.builtin.command:
-        cmd: kubectl delete -n metallb-system ipaddresspools,l2advertisements --all
+        cmd: kubectl --context minicloud delete -n metallb-system ipaddresspools,l2advertisements --all
       changed_when: true
 
     - name: Remove MetalLB controller and speaker deployments
       ansible.builtin.command:
-        cmd: kubectl delete -n metallb-system deployment --all
+        cmd: kubectl --context minicloud delete -n metallb-system deployment --all
       changed_when: true
 
     - name: Remove MetalLB namespace
       ansible.builtin.command:
-        cmd: kubectl delete namespace metallb-system
+        cmd: kubectl --context minicloud delete namespace metallb-system
       changed_when: true
       register: del_ns
       failed_when: del_ns.rc != 0 and "not found" not in del_ns.stderr
