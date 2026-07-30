@@ -1,6 +1,65 @@
 ---
 # Rolling CNI migration: Flannel → Cilium
 #
+# STATUS: Migration COMPLETE (2026-07-28). All 5 nodes on Cilium 1.19.6.
+# MetalLB removed. This playbook documents the correct procedure for
+# any future cluster rebuild.
+#
+# WHAT THIS DOES:
+#   1. Restarts k3s server (set-hog) with flannel disabled — workers
+#      automatically reconnect and pick up Cilium as the active CNI
+#      (CNI selection is lexicographic: 05-cilium.conflist < 10-flannel.conflist).
+#   2. Deletes stale Flannel-era pods whose network namespaces are not in
+#      Cilium eBPF maps — controllers recreate them with clean Cilium networking.
+#   3. Removes MetalLB (replaced by Cilium L2 announcements).
+#
+# KEY LESSONS FROM THE 2026-07-28 MIGRATION:
+#
+#   1. WORKERS NEED NO CONFIG CHANGES.
+#      flannel-backend, disable-network-policy, disable-kube-proxy are
+#      SERVER-ONLY flags. Adding them to a worker config.yaml causes:
+#        "flag provided but not defined: -flannel-backend"
+#      Workers inherit CNI config from the server at reconnect time.
+#
+#   2. SERVER FIRST, NOT WORKERS FIRST.
+#      If workers restart k3s-agent before the server changes flannel-backend,
+#      they race to reinitialize flannel.1 — conflict with cilium_host
+#      (both want 10.42.x.0/24). Server must flip to flannel-backend: none
+#      BEFORE workers restart.
+#
+#   3. blockinfile OVERWRITES EXISTING CONFIG.
+#      Using blockinfile to append to /etc/rancher/k3s/config.yaml drops
+#      all pre-existing flags (secrets-encryption, disable, etcd-snapshot-*).
+#      Use a full file replacement (ansible.builtin.copy) with the complete
+#      intended config, never partial append.
+#
+#   4. k3s ENCRYPTION CONFIG IS cred/encryption-config.json (NOT .yaml).
+#      k3s v1.36 reads/writes /var/lib/rancher/k3s/server/cred/encryption-config.json.
+#      If k3s restarts with secrets-encryption: true but the JSON file is
+#      missing the old key, all existing secrets become unreadable:
+#        "no matching key was found for the provided AES transformer"
+#      Fix: write BOTH the new key (for new writes) and old key (to read existing
+#      secrets) into cred/encryption-config.json before restarting k3s.
+#
+#   5. LONGHORN INSTANCE MANAGER PODS HAVE STALE FLANNEL IPs.
+#      After server restart with Cilium, instance-manager pods created under
+#      Flannel still carry their old IPs (not in Cilium eBPF maps). Longhorn
+#      cannot reach them → volumes stuck in "detaching" for all 33 volumes.
+#      Fix: delete the stale instance-manager pod. The new pod gets a Cilium IP.
+#
+#   6. STALE FLANNEL-ERA PODS NEED DELETION.
+#      Pods created before the migration have Flannel network namespaces.
+#      Health probes on pod-own-IP fail because Cilium doesn't know these
+#      namespaces. Delete affected pods; controllers recreate with Cilium.
+#      Most affected: nginx-ingress, kps-operator, longhorn-manager, longhorn-csi-plugin.
+#
+#   7. PDB DISRUPTIONS BLOCK DRAIN — USE --disable-eviction.
+#      Multiple PDBs had ALLOWED DISRUPTIONS: 0:
+#        langfuse-zookeeper, polaris-dashboard, longhorn instance-managers,
+#        langfuse-web-pdb, langfuse-worker-pdb
+#      Must use: kubectl drain --ignore-daemonsets --delete-emptydir-data
+#                 --disable-eviction --force --timeout=3m
+#
 # Prerequisites (complete before running this playbook):
 #   1. Cilium Helm chart deployed via ArgoCD (apps/cilium.yaml synced manually).
 #      Cilium DaemonSet pods must be Running on all nodes before proceeding.
@@ -9,124 +68,19 @@
 #      kubectl apply -f manifests/cilium/
 #   3. MetalLB still running — do not remove it until Phase 4 (post-migration).
 #
-# Flaw corrections from Staff Engineer review:
-#   - k3s config changes applied per-node synchronously with the drain (not pre-applied
-#     across all nodes), preventing premature flannel/kube-proxy teardown.
-#   - Cilium's DaemonSet writes /etc/cni/net.d/05-cilium.conflist which takes
-#     lexicographic precedence over 10-flannel.conflist — no manual CNI file deletion.
-#   - bgpControlPlane disabled; L2 announcements used instead (no BGP router on LAN).
-#
-# Execution order: workers first, then control plane (set-hog).
-#
 # Dry-run first:
 #   ansible-playbook playbooks/cilium-migration.yml --check
 #
-# Run against a single node to validate before rolling all workers:
-#   ansible-playbook playbooks/cilium-migration.yml --limit fast-skunk
-#
-# Full migration:
-#   ansible-playbook playbooks/cilium-migration.yml
+# Run against control plane only:
+#   ansible-playbook playbooks/cilium-migration.yml --limit set-hog
 
-- name: Migrate workers from Flannel to Cilium
-  hosts: workers
-  serial: 1
-  become: true
-  gather_facts: true
-
-  pre_tasks:
-    - name: Verify Cilium DaemonSet pod is Running on this node before draining
-      delegate_to: localhost
-      become: false
-      ansible.builtin.command:
-        cmd: >
-          kubectl --context minicloud-break-glass get pod -n kube-system
-          -l k8s-app=cilium
-          --field-selector spec.nodeName={{ inventory_hostname }}
-          -o jsonpath='{.items[0].status.phase}'
-      register: cilium_phase
-      failed_when: cilium_phase.stdout != "Running"
-      changed_when: false
-
-  tasks:
-    - name: Cordon and drain node
-      delegate_to: localhost
-      become: false
-      ansible.builtin.command:
-        cmd: >
-          kubectl --context minicloud-break-glass drain {{ inventory_hostname }}
-          --ignore-daemonsets
-          --delete-emptydir-data
-          --timeout=5m
-      changed_when: true
-
-    - name: Apply k3s agent config — disable flannel and kube-proxy
-      ansible.builtin.blockinfile:
-        path: /etc/rancher/k3s/config.yaml
-        create: true
-        marker: "# {mark} CILIUM MIGRATION"
-        block: |
-          flannel-backend: "none"
-          disable-network-policy: true
-          disable-kube-proxy: true
-
-    - name: Restart k3s-agent
-      ansible.builtin.systemd:
-        name: k3s-agent
-        state: restarted
-
-    - name: Wait for k3s-agent to settle
-      ansible.builtin.wait_for:
-        timeout: 30
-
-    - name: Remove stale Flannel overlay interface (best-effort)
-      ansible.builtin.command:
-        cmd: ip link delete flannel.1
-      register: del_flannel
-      failed_when: del_flannel.rc != 0 and "Cannot find device" not in del_flannel.stderr
-      changed_when: del_flannel.rc == 0
-
-    - name: Wait for CiliumNode to report Ready
-      delegate_to: localhost
-      become: false
-      ansible.builtin.command:
-        cmd: >
-          kubectl --context minicloud-break-glass get ciliumnode {{ inventory_hostname }}
-          -o jsonpath='{.status.cilium.state}'
-      register: cilium_state
-      retries: 20
-      delay: 10
-      until: cilium_state.stdout == "Ready"
-      changed_when: false
-
-    - name: Uncordon node
-      delegate_to: localhost
-      become: false
-      ansible.builtin.command:
-        cmd: kubectl --context minicloud-break-glass uncordon {{ inventory_hostname }}
-      changed_when: true
-
-    - name: Pause 15 seconds before next node
-      ansible.builtin.pause:
-        seconds: 15
-
-
-- name: Migrate control plane (set-hog) from Flannel to Cilium
+- name: Phase 1 — Migrate control plane (set-hog) from Flannel to Cilium
   hosts: control_plane
   serial: 1
   become: true
   gather_facts: true
 
   pre_tasks:
-    - name: Verify all workers are already on Cilium before touching control plane
-      delegate_to: localhost
-      become: false
-      ansible.builtin.command:
-        cmd: >
-          kubectl --context minicloud-break-glass get nodes -l '!node-role.kubernetes.io/control-plane'
-          -o jsonpath='{range .items[*]}{.metadata.name}={.spec.taints}{"\n"}{end}'
-      register: worker_taint_check
-      changed_when: false
-
     - name: Verify Cilium DaemonSet pod is Running on control plane
       delegate_to: localhost
       become: false
@@ -141,7 +95,7 @@
       changed_when: false
 
   tasks:
-    - name: Cordon and drain control plane
+    - name: Cordon and drain control plane (force-evict if PDBs block)
       delegate_to: localhost
       become: false
       ansible.builtin.command:
@@ -149,25 +103,35 @@
           kubectl --context minicloud-break-glass drain {{ inventory_hostname }}
           --ignore-daemonsets
           --delete-emptydir-data
-          --timeout=5m
+          --disable-eviction
+          --force
+          --timeout=3m
       changed_when: true
 
-    - name: Apply k3s server config — disable flannel and kube-proxy
-      ansible.builtin.blockinfile:
-        path: /etc/rancher/k3s/config.yaml
-        create: true
-        marker: "# {mark} CILIUM MIGRATION"
-        block: |
+    - name: Write complete k3s server config with flannel disabled
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
           flannel-backend: "none"
           disable-network-policy: true
           disable-kube-proxy: true
+          secrets-encryption: true
+          disable:
+            - servicelb
+            - traefik
+          etcd-snapshot-schedule-cron: "0 */6 * * *"
+          etcd-snapshot-retention: 10
+          etcd-snapshot-dir: /var/lib/rancher/k3s/server/db/snapshots
 
     - name: Restart k3s server (control plane)
       ansible.builtin.systemd:
         name: k3s
         state: restarted
 
-    - name: Wait for k3s server to be ready (API server back up)
+    - name: Wait for API server to come back up
       delegate_to: localhost
       become: false
       ansible.builtin.command:
@@ -178,7 +142,7 @@
       until: node_check.rc == 0
       changed_when: false
 
-    - name: Remove stale Flannel overlay interface on control plane (best-effort)
+    - name: Remove stale flannel.1 interface on control plane (best-effort)
       ansible.builtin.command:
         cmd: ip link delete flannel.1
       register: del_flannel_cp
@@ -205,6 +169,98 @@
         cmd: kubectl --context minicloud-break-glass uncordon {{ inventory_hostname }}
       changed_when: true
 
+    - name: Wait 60s for workers to reconnect with Cilium CNI active
+      ansible.builtin.pause:
+        seconds: 60
+
+
+- name: Phase 2 — Restart k3s-agent on each worker (NO config changes)
+  hosts: workers
+  serial: 1
+  become: true
+  gather_facts: false
+
+  tasks:
+    # Workers pick up flannel-backend=none automatically from the server.
+    # No config.yaml changes needed — adding server-only flags to workers
+    # causes: "flag provided but not defined: -flannel-backend"
+    - name: Restart k3s-agent (inherits Cilium CNI from server)
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: restarted
+
+    - name: Remove stale flannel.1 interface (best-effort)
+      ansible.builtin.command:
+        cmd: ip link delete flannel.1
+      register: del_flannel
+      failed_when: del_flannel.rc != 0 and "Cannot find device" not in del_flannel.stderr
+      changed_when: del_flannel.rc == 0
+
+    - name: Wait for CiliumNode to report Ready
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        cmd: >
+          kubectl --context minicloud-break-glass get ciliumnode {{ inventory_hostname }}
+          -o jsonpath='{.status.cilium.state}'
+      register: cilium_state
+      retries: 20
+      delay: 10
+      until: cilium_state.stdout == "Ready"
+      changed_when: false
+
+    - name: Pause 15s before next worker
+      ansible.builtin.pause:
+        seconds: 15
+
+
+- name: Phase 3 — Delete stale Flannel-era pods
+  hosts: localhost
+  become: false
+  gather_facts: false
+
+  tasks:
+    # Delete the Longhorn instance-manager pod — it has a Flannel-era IP
+    # that is not in Cilium eBPF maps, causing all 33 volumes to stick in
+    # "detaching". The new pod gets a Cilium IP and volumes clear immediately.
+    - name: Delete stale Longhorn instance-manager pods on control plane
+      ansible.builtin.command:
+        cmd: >
+          kubectl --context minicloud-break-glass delete pod -n longhorn-system
+          -l longhorn.io/node=set-hog,longhorn.io/component=instance-manager
+          --force --grace-period=0
+      register: del_im
+      changed_when: "'deleted' in del_im.stdout"
+      failed_when: del_im.rc != 0 and "not found" not in del_im.stderr
+
+    - name: Wait 30s for instance-manager to come back with Cilium IP
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Delete stale nginx-ingress pod (Flannel network namespace)
+      ansible.builtin.command:
+        cmd: >
+          kubectl --context minicloud-break-glass delete pod -n ingress-nginx
+          -l app.kubernetes.io/name=ingress-nginx
+          --force --grace-period=0
+      register: del_nginx
+      changed_when: "'deleted' in del_nginx.stdout"
+      failed_when: del_nginx.rc != 0 and "not found" not in del_nginx.stderr
+
+    - name: Delete other stale pods that fail health probes post-migration
+      ansible.builtin.command:
+        cmd: >
+          kubectl --context minicloud-break-glass delete pod -n {{ item.ns }}
+          -l {{ item.label }}
+          --force --grace-period=0
+      loop:
+        - { ns: kube-system, label: "app.kubernetes.io/name=kube-prometheus-stack-operator" }
+        - { ns: longhorn-system, label: "app=longhorn-manager" }
+        - { ns: longhorn-system, label: "app=longhorn-csi-plugin" }
+      register: del_stale
+      changed_when: "'deleted' in del_stale.stdout"
+      failed_when: del_stale.rc != 0 and "not found" not in del_stale.stderr
+
 
 - name: Phase 4 — Validate Cilium and remove MetalLB
   hosts: localhost
@@ -212,17 +268,16 @@
   gather_facts: false
 
   tasks:
-    - name: Verify all nodes are Ready and on Cilium
+    - name: Verify all CiliumNodes are Ready
       ansible.builtin.command:
         cmd: kubectl --context minicloud-break-glass get ciliumnode -o wide
       changed_when: false
 
-    - name: Verify LoadBalancer VIP is still reachable via Cilium L2 announcement
+    - name: Verify LoadBalancer VIP is reachable via Cilium L2
       ansible.builtin.command:
         cmd: >
-          kubectl --context minicloud-break-glass get svc -A -o jsonpath=
-          '{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name}
-           IP={.status.loadBalancer.ingress[0].ip}{"\n"}{end}'
+          kubectl --context minicloud-break-glass get svc -A
+          -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name} IP={.status.loadBalancer.ingress[0].ip}{"\n"}{end}'
       changed_when: false
       register: lb_check
 
@@ -230,36 +285,38 @@
       ansible.builtin.debug:
         var: lb_check.stdout_lines
 
-    - name: Prompt operator to confirm VIP is reachable before removing MetalLB
+    - name: Confirm VIP reachable before removing MetalLB
       ansible.builtin.pause:
         prompt: |
-          Confirm https://homer.10.0.0.200.nip.io (or any VIP service) is reachable.
+          Confirm https://homer.10.0.0.200.nip.io returns HTTP 302.
           Press Enter to remove MetalLB, Ctrl-C to abort.
 
-    - name: Remove MetalLB CRs (IPAddressPool + L2Advertisement)
+    - name: Remove MetalLB CRs
       ansible.builtin.command:
         cmd: kubectl --context minicloud-break-glass delete -n metallb-system ipaddresspools,l2advertisements --all
       changed_when: true
+      failed_when: false
 
-    - name: Remove MetalLB controller and speaker deployments
+    - name: Remove MetalLB workloads
       ansible.builtin.command:
-        cmd: kubectl --context minicloud-break-glass delete -n metallb-system deployment --all
+        cmd: kubectl --context minicloud-break-glass delete -n metallb-system deployment,daemonset --all
       changed_when: true
+      failed_when: false
 
-    - name: Remove MetalLB namespace
+    - name: Delete MetalLB namespace
       ansible.builtin.command:
         cmd: kubectl --context minicloud-break-glass delete namespace metallb-system
       changed_when: true
       register: del_ns
       failed_when: del_ns.rc != 0 and "not found" not in del_ns.stderr
 
-    - name: Migration complete — summary
+    - name: Migration complete — next steps
       ansible.builtin.debug:
         msg: |
-          Cilium migration complete.
-          Next steps:
-            1. Add hubble.10.0.0.200.nip.io to Homer dashboard (manifests/homer/01-configmap.yaml)
-            2. Add cert-manager Certificate for hubble-ui-tls in kube-system
-            3. Remove metallb-system from ArgoCD project namespace allowlist (00-project.yaml)
-            4. Enable ArgoCD automated sync in apps/cilium.yaml now that migration is stable
-            5. Write a CiliumNetworkPolicy to replace any existing NetworkPolicy resources
+          Cilium migration complete. Post-migration checklist:
+            1. Merge minicloud-gitops PR (removes metallb-system from ArgoCD project,
+               enables automated sync on cilium Application)
+            2. Verify ArgoCD syncs cilium Application with all 3 sources
+            3. Confirm hubble-ui-tls Certificate issued by cert-manager
+            4. Test https://hubble.10.0.0.200.nip.io (Tailscale)
+            5. Update controller CLAUDE.md with migration findings
