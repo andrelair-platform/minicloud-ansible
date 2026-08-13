@@ -1,0 +1,44 @@
+---
+# Fix NVMe boot loop on ThinkPads running kernel 6.8.0-137.
+#
+# Root cause: GRUB_TIMEOUT=0 causes GRUB to pass through before the NVMe PCIe
+# link trains, leaving the drive invisible to the kernel. Setting GRUB_TIMEOUT=3
+# gives the PCIe link 3 seconds to enumerate without changing visible boot
+# behaviour (GRUB_TIMEOUT_STYLE=hidden keeps the boot menu suppressed).
+#
+# Apply to ThinkPads only — swift-mac uses macOS bootloader, not GRUB.
+# Run once per node, then change BIOS boot order to NVMe-first to verify.
+#
+# Usage:
+#   ansible-playbook -i inventory.yml playbooks/fix-grub-timeout.yml
+#   # (proxied through controller — no direct SSH to nodes needed from Mac)
+- name: Fix GRUB_TIMEOUT on ThinkPad nodes to allow NVMe PCIe link training
+  hosts:
+    - set-hog
+    - fast-skunk
+    - fast-heron
+    - star-kitten
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Set GRUB_TIMEOUT=3 (allow NVMe PCIe link to train before boot)
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_TIMEOUT='
+        line: 'GRUB_TIMEOUT=3'
+        backrefs: false
+      notify: update-grub
+
+    - name: Ensure GRUB_TIMEOUT_STYLE is hidden (silent boot menu, just wait)
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_TIMEOUT_STYLE='
+        line: 'GRUB_TIMEOUT_STYLE=hidden'
+        backrefs: false
+      notify: update-grub
+
+  handlers:
+    - name: update-grub
+      ansible.builtin.command: update-grub
+      changed_when: true
