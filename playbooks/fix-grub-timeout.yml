@@ -1,18 +1,22 @@
 ---
 # Fix NVMe boot loop on ThinkPads running kernel 6.8.0-137.
 #
-# Root cause: GRUB_TIMEOUT=0 causes GRUB to pass through before the NVMe PCIe
-# link trains, leaving the drive invisible to the kernel. Setting GRUB_TIMEOUT=3
-# gives the PCIe link 3 seconds to enumerate without changing visible boot
-# behaviour (GRUB_TIMEOUT_STYLE=hidden keeps the boot menu suppressed).
+# Two-part fix:
+#   1. GRUB_TIMEOUT=3 — gives the NVMe PCIe link 3 seconds to train after GRUB
+#      loads (GRUB_TIMEOUT_STYLE=hidden keeps the boot menu suppressed).
+#   2. Ubuntu UEFI boot entry — MAAS provisioning leaves only a generic NVMe0
+#      device entry in UEFI NVRAM. Booting that entry forces UEFI to enumerate
+#      the drive from scratch, which times out before the PCIe link trains.
+#      Creating a direct entry pointing to grubx64.efi bypasses enumeration.
+#      The entry is placed first in BootOrder automatically by efibootmgr.
 #
 # Apply to ThinkPads only — swift-mac uses macOS bootloader, not GRUB.
-# Run once per node, then change BIOS boot order to NVMe-first to verify.
+# Idempotent: safe to re-run on nodes already fixed.
 #
 # Usage:
 #   ansible-playbook -i inventory.yml playbooks/fix-grub-timeout.yml
-#   # (proxied through controller — no direct SSH to nodes needed from Mac)
-- name: Fix GRUB_TIMEOUT on ThinkPad nodes to allow NVMe PCIe link training
+#   ansible-playbook -i inventory.yml playbooks/fix-grub-timeout.yml --limit new-node
+- name: Fix NVMe boot on ThinkPad nodes (GRUB timeout + Ubuntu UEFI entry)
   hosts:
     - set-hog
     - fast-skunk
@@ -37,6 +41,20 @@
         line: 'GRUB_TIMEOUT_STYLE=hidden'
         backrefs: false
       notify: update-grub
+
+    - name: Check if Ubuntu UEFI boot entry already exists
+      ansible.builtin.command: efibootmgr
+      register: efibootmgr_output
+      changed_when: false
+
+    - name: Create Ubuntu UEFI boot entry pointing to grubx64.efi
+      ansible.builtin.command: >
+        efibootmgr --create
+        --disk /dev/nvme0n1
+        --part 1
+        --label 'Ubuntu'
+        --loader '\EFI\ubuntu\grubx64.efi'
+      when: "'Ubuntu' not in efibootmgr_output.stdout"
 
   handlers:
     - name: update-grub
