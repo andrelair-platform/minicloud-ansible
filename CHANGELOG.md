@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/andrelair-platform/minicloud-ansible/compare/minicloud-ansible-v0.1.1...minicloud-ansible-v0.1.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **website:** correct sidebars.ts brace syntax ([4ff62c8](https://github.com/andrelair-platform/minicloud-ansible/commit/4ff62c843be88e940dc6215d8535562fa5513db3))
+
 ## [0.1.1](https://github.com/andrelair-platform/minicloud-ansible/compare/minicloud-ansible-v0.1.0...minicloud-ansible-v0.1.1) (2026-08-14)
 
 
