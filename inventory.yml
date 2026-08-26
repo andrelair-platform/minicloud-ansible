@@ -15,6 +15,8 @@ all:
           ansible_host: 10.0.0.7
         star-kitten:
           ansible_host: 10.0.0.8
+        loving-gannet:
+          ansible_host: 10.0.0.9
         swift-mac:
           ansible_host: 10.0.0.10
           ansible_user: andre
