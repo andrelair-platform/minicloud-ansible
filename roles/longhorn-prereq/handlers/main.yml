@@ -1,0 +1,17 @@
+---
+# Applying the blacklist alone doesn't drop maps multipathd already established, so flush
+# them first (a map held by a live filesystem can't be flushed — harmless, hence failed_when
+# false), then restart so multipathd reloads config and stops reclaiming Longhorn devices.
+- name: Flush and restart multipathd
+  become: true
+  block:
+    - name: Flush existing multipath maps
+      ansible.builtin.command: multipath -F
+      register: multipath_flush
+      changed_when: multipath_flush.rc == 0
+      failed_when: false
+
+    - name: Restart multipathd
+      ansible.builtin.systemd:
+        name: multipathd
+        state: restarted
