@@ -11,3 +11,39 @@
     enabled: true
     state: started
   become: true
+
+# Longhorn exposes each volume as an iSCSI target (IET / VIRTUAL-DISK). If multipathd is
+# running it claims those /dev/sdX devices as mpathN and holds them at the device-mapper
+# layer, so kubelet's mount fails with "already mounted or mount point busy" and pods hang
+# in ContainerCreating. This bit loving-gannet (the newest node) — it never had the
+# blacklist the older nodes carry. Blacklist the Longhorn iSCSI device by vendor/product so
+# multipathd ignores ONLY it (root/boot is on nvme, so real disks are unaffected).
+- name: Check whether multipathd is installed
+  ansible.builtin.stat:
+    path: /lib/systemd/system/multipathd.service
+  register: multipathd_unit
+  become: true
+
+- name: Blacklist Longhorn iSCSI devices from multipath
+  ansible.builtin.copy:
+    dest: /etc/multipath.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      defaults {
+          user_friendly_names yes
+      }
+      # Longhorn volumes are exported as iSCSI (IET / VIRTUAL-DISK). multipathd must NOT
+      # claim them, or it holds the /dev/longhorn/pvc-* device at the dm layer and kubelet's
+      # mount fails with "already mounted or mount point busy". Root/boot is on nvme, so this
+      # only excludes Longhorn devices. Managed by the longhorn-prereq Ansible role.
+      blacklist {
+          device {
+              vendor "IET"
+              product "VIRTUAL-DISK"
+          }
+      }
+  become: true
+  when: multipathd_unit.stat.exists
+  notify: Flush and restart multipathd
