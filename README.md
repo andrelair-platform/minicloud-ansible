@@ -8,9 +8,9 @@ Codifies the **post-MAAS, pre-k3s node bootstrap** for the minicloud
 cluster, plus a rolling-upgrade playbook for Day-2 maintenance.
 
 This repo is *not* responsible for installing k3s. The cluster is live and
-healthy (Phases 1–9); changing it via Ansible is unnecessarily risky. These
-roles cover only the OS-level prerequisites that need to be re-applied if a
-node is reimaged.
+healthy (Phases 0–90 complete, 6 nodes); changing it via Ansible is unnecessarily
+risky. These roles cover only the OS-level prerequisites that need to be
+re-applied if a node is reimaged.
 
 **Live docs:** <https://andrelair-platform.github.io/minicloud-platform-docs/>
 — see [Phase 10 — Ansible](https://andrelair-platform.github.io/minicloud-platform-docs/platform-roadmap/phase-10-ansible) for the full
@@ -43,7 +43,7 @@ upgrade playbook.
 ```
 ansible/
   ansible.cfg            # inventory path, callback format, ssh pipelining
-  inventory.yml          # 3 nodes grouped: control_plane / workers / cluster
+  inventory.yml          # 6 nodes grouped: control_plane / workers / cluster
   playbooks/
     site.yml             # bootstrap: common + longhorn-prereq + k3s-registries + network
     upgrade.yml          # Day-2: rolling apt upgrade with drain/uncordon
@@ -59,8 +59,10 @@ ansible/
 ## Prerequisites
 
 * `ansible-core` 2.18 or later — install via `pipx install --include-deps ansible`
-* SSH key auth from this controller to `ubuntu@10.0.0.{2,4,7}` (already in place)
-* `ubuntu` user has passwordless sudo on each node (already in place)
+* SSH key auth from this controller to every node: `ubuntu@10.0.0.{2,4,7,8,9}` plus
+  `andre@10.0.0.10` (swift-mac, the MacBook Pro — its login user is `andre`, not
+  `ubuntu`; set in `inventory.yml`) — all already in place
+* the login user has passwordless sudo on each node (already in place)
 
 ---
 
@@ -71,7 +73,8 @@ cd ansible/
 ansible all -m ping
 ```
 
-Expected: `pong` from `set-hog`, `fast-skunk`, `fast-heron`.
+Expected: `pong` from all six nodes — `set-hog` (control plane), `fast-skunk`,
+`fast-heron`, `star-kitten`, `loving-gannet`, and `swift-mac`.
 
 ---
 
@@ -117,7 +120,7 @@ idempotent and should be fixed.
 Pre-flight before running for real:
 
 * Every workload should have ≥ 2 replicas with anti-affinity across workers
-  (Phase 9's podinfo satisfies this).
+  (the cluster's HA workloads satisfy this).
 * Longhorn volumes should have ≥ 2 healthy replicas — drain will fail-safe
   if it cannot relocate volumes.
 * Always `--check` first.
