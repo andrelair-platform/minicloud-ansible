@@ -1,0 +1,265 @@
+---
+# restore-control-plane.yml — scripted DR for the k3s (Kine/SQLite) control plane.
+#
+# WHY (audit R-02, Stage 0 / Track A): the cluster runs a SINGLE k3s server (set-hog) on a
+# SQLite/kine datastore — there is no control-plane HA and no in-place SQLite→etcd migration.
+# The documented mitigation is to make control-plane loss a BOUNDED, drilled event instead of
+# a scary manual restore. This playbook turns the ops-runbook into one command + a safe drill.
+#
+# WHAT IT RESTORES: /var/lib/rancher/k3s/server/db/state.db from the daily Kine backup produced
+# by the `k3s-sqlite-backup` CronJob — a `VACUUM INTO` full copy (self-contained .db.gz), so a
+# restore is a clean file-replace (no SQL replay). Sources:
+#   - minio : controller MinIO bucket  s3://k3s-backup           (on-site, primary)
+#   - r2    : Cloudflare R2 mirror      minicloud-backup-offsite/k3s-backup  (off-site, site-loss DR)
+#             (populated by minicloud-gitops backup-offsite-mirror — audit R-01)
+#
+# TWO MODES:
+#   - DRILL (default): download the latest backup, gunzip-test it, run `PRAGMA integrity_check`,
+#     report size/age. Touches NOTHING on the live cluster — safe to run/schedule regularly.
+#   - RESTORE (-e confirm_restore=true): stop k3s → snapshot the current db aside → replace
+#     state.db (drop WAL/SHM) → start k3s → wait for the API and a Ready node. DESTRUCTIVE.
+#
+# CREDENTIALS (via env so they never hit shell history / the CLI):
+#   export MINIO_SECRET_KEY=...                         # required (source=minio)
+#   export R2_ACCESS_KEY=... R2_SECRET_KEY=... R2_ENDPOINT=https://<acct>.r2.cloudflarestorage.com
+#                                                        # required (source=r2)
+#
+# USAGE:
+#   # Drill against the on-site backup (safe, no changes):
+#   MINIO_SECRET_KEY=... ansible-playbook playbooks/restore-control-plane.yml
+#
+#   # Drill against the OFF-SITE copy (proves site-loss recoverability):
+#   R2_ACCESS_KEY=... R2_SECRET_KEY=... R2_ENDPOINT=... \
+#     ansible-playbook playbooks/restore-control-plane.yml -e restore_source=r2
+#
+#   # REAL restore (destructive — rebuild after set-hog disk loss / corruption):
+#   MINIO_SECRET_KEY=... ansible-playbook playbooks/restore-control-plane.yml -e confirm_restore=true
+#
+#   # Pin a specific backup object instead of "latest":
+#   ... -e backup_file=k3s-state-20260922-033000.db.gz
+#
+# NOTE: for a from-scratch rebuild (fresh disk), run install-k3s.yml --tags control-plane FIRST
+# (to lay down k3s + systemd), then this playbook with confirm_restore=true to load the state.
+
+- name: Restore / drill the k3s control-plane datastore
+  hosts: control_plane
+  gather_facts: true
+  become: true
+
+  vars:
+    restore_source: "minio"                 # minio | r2
+    confirm_restore: false                  # true = perform the destructive restore
+    backup_file: ""                         # empty = latest object in the bucket
+    k3s_db_dir: /var/lib/rancher/k3s/server/db
+    minio_endpoint: "http://10.0.0.1:9000"
+    minio_access_key: "admin"
+    minio_secret_key: "{{ lookup('env', 'MINIO_SECRET_KEY') }}"
+    minio_bucket: "k3s-backup"
+    r2_access_key: "{{ lookup('env', 'R2_ACCESS_KEY') }}"
+    r2_secret_key: "{{ lookup('env', 'R2_SECRET_KEY') }}"
+    r2_endpoint: "{{ lookup('env', 'R2_ENDPOINT') }}"
+    r2_bucket: "minicloud-backup-offsite/k3s-backup"
+    mc_bin: /usr/local/bin/mc
+    work_dir: /tmp/k3s-restore
+
+  tasks:
+    # ── Pre-flight ──────────────────────────────────────────────────────────
+    - name: Validate credentials for the chosen source
+      ansible.builtin.assert:
+        that:
+          - (restore_source == 'minio' and minio_secret_key | length > 0) or
+            (restore_source == 'r2' and (r2_access_key | length > 0) and (r2_secret_key | length > 0) and (r2_endpoint | length > 0))
+        fail_msg: >-
+          Missing credentials for source '{{ restore_source }}'.
+          For minio: export MINIO_SECRET_KEY. For r2: export R2_ACCESS_KEY, R2_SECRET_KEY, R2_ENDPOINT.
+        success_msg: "Credentials present for source '{{ restore_source }}'."
+
+    - name: Show run mode
+      ansible.builtin.debug:
+        msg: >-
+          Mode={{ 'RESTORE (DESTRUCTIVE)' if (confirm_restore | bool) else 'DRILL (read-only)' }}
+          Source={{ restore_source }}  Bucket={{ minio_bucket if restore_source == 'minio' else r2_bucket }}
+
+    - name: Ensure host tools present (sqlite3 for integrity check, gzip)
+      ansible.builtin.apt:
+        name: [sqlite3, gzip]
+        state: present
+        update_cache: true
+      # Best-effort: during a real DR the node has internet; skip cleanly if offline + already present.
+      failed_when: false
+
+    - name: Check for the mc (MinIO client) binary
+      ansible.builtin.stat:
+        path: "{{ mc_bin }}"
+      register: mc_stat
+
+    - name: Download mc static binary if missing
+      ansible.builtin.get_url:
+        url: https://dl.min.io/client/mc/release/linux-amd64/mc
+        dest: "{{ mc_bin }}"
+        mode: "0755"
+      when: not mc_stat.stat.exists
+
+    - name: Create work dir
+      ansible.builtin.file:
+        path: "{{ work_dir }}"
+        state: directory
+        mode: "0700"
+
+    # ── Configure mc alias for the chosen source ────────────────────────────
+    - name: Configure mc alias (minio)
+      ansible.builtin.command:
+        cmd: "{{ mc_bin }} alias set src {{ minio_endpoint }} {{ minio_access_key }} {{ minio_secret_key }}"
+      no_log: true
+      changed_when: false
+      when: restore_source == 'minio'
+
+    - name: Configure mc alias (r2)
+      ansible.builtin.command:
+        cmd: "{{ mc_bin }} alias set src {{ r2_endpoint }} {{ r2_access_key }} {{ r2_secret_key }} --api S3v4"
+      no_log: true
+      changed_when: false
+      when: restore_source == 'r2'
+
+    - name: Resolve bucket path
+      ansible.builtin.set_fact:
+        src_path: "src/{{ minio_bucket if restore_source == 'minio' else r2_bucket }}"
+
+    # ── Select the backup object (latest unless pinned) ─────────────────────
+    - name: Find latest backup object (timestamped names sort chronologically)
+      ansible.builtin.shell:
+        cmd: "set -o pipefail; {{ mc_bin }} ls {{ src_path }}/ | awk '{print $NF}' | grep -E '\\.db\\.gz$' | sort | tail -1"
+      args:
+        executable: /bin/bash
+      register: latest_obj
+      changed_when: false
+      when: backup_file | length == 0
+
+    - name: Set chosen backup object
+      ansible.builtin.set_fact:
+        chosen_obj: "{{ backup_file if backup_file | length > 0 else latest_obj.stdout | trim }}"
+
+    - name: Fail if no backup found
+      ansible.builtin.assert:
+        that: chosen_obj | length > 0
+        fail_msg: "No .db.gz backup found at {{ src_path }} — check the source/bucket/credentials."
+
+    - name: Download the chosen backup
+      ansible.builtin.command:
+        cmd: "{{ mc_bin }} cp {{ src_path }}/{{ chosen_obj }} {{ work_dir }}/{{ chosen_obj }}"
+      changed_when: true
+
+    # ── Validate (both modes) ───────────────────────────────────────────────
+    - name: gunzip-test the archive
+      ansible.builtin.command:
+        cmd: "gzip -t {{ work_dir }}/{{ chosen_obj }}"
+      changed_when: false
+
+    - name: Decompress to a candidate state.db
+      ansible.builtin.shell:
+        cmd: "gunzip -c {{ work_dir }}/{{ chosen_obj }} > {{ work_dir }}/state.db"
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: SQLite integrity check on the candidate
+      ansible.builtin.command:
+        cmd: "sqlite3 {{ work_dir }}/state.db 'PRAGMA integrity_check;'"
+      register: integrity
+      changed_when: false
+
+    - name: Assert integrity check passed
+      ansible.builtin.assert:
+        that: "'ok' in integrity.stdout"
+        fail_msg: "Integrity check FAILED for {{ chosen_obj }}: {{ integrity.stdout }} — backup is unusable."
+        success_msg: "Integrity OK for {{ chosen_obj }}."
+
+    - name: Candidate stats
+      ansible.builtin.stat:
+        path: "{{ work_dir }}/state.db"
+      register: cand
+
+    - name: DRILL RESULT
+      ansible.builtin.debug:
+        msg:
+          - "Source          : {{ restore_source }} ({{ src_path }})"
+          - "Backup object   : {{ chosen_obj }}"
+          - "Decompressed size: {{ (cand.stat.size / 1024 / 1024) | round(1) }} MiB"
+          - "Integrity       : {{ integrity.stdout }}"
+          - "Verdict         : RESTORABLE ✅  (this backup can rebuild the control plane)"
+      when: not (confirm_restore | bool)
+
+    # ── RESTORE (destructive, gated) ────────────────────────────────────────
+    - name: Confirm destructive restore
+      ansible.builtin.pause:
+        prompt: >-
+          About to STOP k3s on {{ inventory_hostname }} and REPLACE {{ k3s_db_dir }}/state.db with
+          {{ chosen_obj }}. The current db is snapshotted aside first. Press ENTER to proceed, Ctrl-C to abort
+      when: confirm_restore | bool
+
+    - name: Stop k3s
+      ansible.builtin.systemd:
+        name: k3s
+        state: stopped
+      when: confirm_restore | bool
+
+    - name: Snapshot the current datastore aside (rollback safety)
+      ansible.builtin.command:
+        cmd: "cp -a {{ k3s_db_dir }} {{ k3s_db_dir }}.bak-{{ ansible_date_time.iso8601_basic_short }}"
+      register: db_snapshot
+      changed_when: true
+      when: confirm_restore | bool
+
+    - name: Install the restored state.db
+      ansible.builtin.copy:
+        src: "{{ work_dir }}/state.db"
+        dest: "{{ k3s_db_dir }}/state.db"
+        remote_src: true
+        mode: "0600"
+      when: confirm_restore | bool
+
+    - name: Remove stale WAL/SHM (VACUUM INTO copy is self-contained)
+      ansible.builtin.file:
+        path: "{{ k3s_db_dir }}/{{ item }}"
+        state: absent
+      loop: [state.db-wal, state.db-shm]
+      when: confirm_restore | bool
+
+    - name: Start k3s
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+      when: confirm_restore | bool
+
+    - name: Wait for the k3s API (port 6443)
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 6443
+        timeout: 180
+      when: confirm_restore | bool
+
+    - name: Wait for the control-plane node to be Ready
+      ansible.builtin.command:
+        cmd: "k3s kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=180s"
+      register: node_ready
+      changed_when: false
+      retries: 3
+      delay: 10
+      until: node_ready.rc == 0
+      when: confirm_restore | bool
+
+    - name: RESTORE RESULT
+      ansible.builtin.debug:
+        msg:
+          - "Restored {{ chosen_obj }} → {{ k3s_db_dir }}/state.db"
+          - "Previous datastore snapshot: {{ db_snapshot.cmd | default('n/a') }}"
+          - "k3s API up and node Ready ✅"
+          - "Next: verify workloads (kubectl get pods -A | grep -v Running | grep -v Completed),"
+          - "then remove the .bak-* snapshot once satisfied."
+      when: confirm_restore | bool
+
+    # ── Cleanup ─────────────────────────────────────────────────────────────
+    - name: Clean up the downloaded artifacts
+      ansible.builtin.file:
+        path: "{{ work_dir }}"
+        state: absent
