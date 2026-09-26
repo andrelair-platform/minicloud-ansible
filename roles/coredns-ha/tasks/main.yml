@@ -1,0 +1,24 @@
+---
+# CoreDNS HA — assert 2 replicas in the k3s-managed coredns AddOn so cluster DNS
+# survives a single node loss. k3s OWNS /var/lib/rancher/k3s/server/manifests/coredns.yaml
+# and rewrites it on a k3s upgrade (resetting to the default 1 replica); this re-asserts
+# replicas:2 idempotently. k3s re-applies the AddOn automatically when the file changes.
+# Runs only on the control-plane (server) node — that's where the AddOn manifest lives.
+- name: Check the k3s coredns AddOn exists
+  ansible.builtin.stat:
+    path: /var/lib/rancher/k3s/server/manifests/coredns.yaml
+  register: coredns_addon
+  become: true
+
+- name: Ensure CoreDNS runs 2 replicas (HA) in the k3s coredns AddOn
+  ansible.builtin.lineinfile:
+    path: /var/lib/rancher/k3s/server/manifests/coredns.yaml
+    # revisionHistoryLimit is the unique first line of the Deployment's spec: — anchor to it
+    # so replicas lands under the Deployment (not the Service spec further down).
+    insertbefore: '^  revisionHistoryLimit: 0$'
+    line: '  replicas: 2'
+    regexp: '^  replicas: 2$'
+    firstmatch: true
+    state: present
+  become: true
+  when: coredns_addon.stat.exists

@@ -7,3 +7,9 @@
     - longhorn-prereq
     - k3s-registries
     - network
+
+- name: Control-plane customizations (k3s server node only)
+  hosts: control_plane
+  gather_facts: false
+  roles:
+    - coredns-ha
