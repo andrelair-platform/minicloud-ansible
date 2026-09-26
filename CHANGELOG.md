@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.2](https://github.com/andrelair-platform/minicloud-ansible/compare/minicloud-ansible-v0.1.1...minicloud-ansible-v0.1.2) (2026-09-26)
+
+
+### Features
+
+* **common:** disable swap on all nodes (k8s runs swapless) ([#20](https://github.com/andrelair-platform/minicloud-ansible/issues/20)) ([8ed2a89](https://github.com/andrelair-platform/minicloud-ansible/commit/8ed2a89edb3d1e31807fa9092011f9b6ba3c3b0b))
+* **coredns-ha:** re-assert CoreDNS replicas:2 in the k3s AddOn (durable) ([#21](https://github.com/andrelair-platform/minicloud-ansible/issues/21)) ([163918a](https://github.com/andrelair-platform/minicloud-ansible/commit/163918a935f4f2e81595ab3034eaebf3ae06b7ee))
+* **dr:** scripted control-plane restore + drill playbook (Stage 0 / R-02) ([085b08e](https://github.com/andrelair-platform/minicloud-ansible/commit/085b08ea5ac4ba18d771b39e271e0c8fe00a2e59))
+
+
+### Bug Fixes
+
+* **inventory:** add loving-gannet (10.0.0.9) to workers ([#16](https://github.com/andrelair-platform/minicloud-ansible/issues/16)) ([cbfa31b](https://github.com/andrelair-platform/minicloud-ansible/commit/cbfa31b122e18964ffe6385ef38d67af0c73a46a))
+* **longhorn-prereq:** blacklist Longhorn iSCSI devices from multipathd ([#17](https://github.com/andrelair-platform/minicloud-ansible/issues/17)) ([063fbc1](https://github.com/andrelair-platform/minicloud-ansible/commit/063fbc1669c2e59bf1651173072d81d9912a4c78))
+* **website:** correct sidebars.ts brace syntax ([4ff62c8](https://github.com/andrelair-platform/minicloud-ansible/commit/4ff62c843be88e940dc6215d8535562fa5513db3))
+
 ## [0.1.1](https://github.com/andrelair-platform/minicloud-ansible/compare/minicloud-ansible-v0.1.0...minicloud-ansible-v0.1.1) (2026-08-14)
 
 
