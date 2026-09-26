@@ -6,3 +6,26 @@
     update_cache: true
     cache_valid_time: 3600
   become: true
+
+# Kubernetes nodes run SWAPLESS — predictable OOM/scheduling semantics, and no
+# swap-thrash latency/wear on old consumer SSDs. Ubuntu ships a /swap.img swapfile
+# via fstab (+ a generated systemd unit); disable both so a re-provision stays off.
+- name: Disable swap at runtime
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb | default(0) > 0
+  changed_when: true
+  become: true
+
+- name: Disable swap persistently (comment swap entries in /etc/fstab)
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\s+swap\s+.*)$'
+    replace: '# \1  # k8s node: swap disabled'
+  become: true
+  register: fstab_swap
+
+- name: Reload systemd so the generated swap unit is dropped
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: fstab_swap is changed
+  become: true
