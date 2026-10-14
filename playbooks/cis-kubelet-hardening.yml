@@ -55,8 +55,14 @@
             - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
             - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
             - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-          # 4.2.13 — pod PID limit
-          podPidsLimit: 1024
+          # 4.2.13 — pod PID limit. Raised 1024 → 32768 (2026-10-14): the Longhorn engine
+          # instance-manager on a replica-dense node runs ~1000 threads and was pinned at
+          # ~992/1024, so forking a new engine/replica process (or a live engine-upgrade that
+          # briefly runs old+new) failed with `fork: resource temporarily unavailable` →
+          # chronic volume rebuild/upgrade failures. 32768 keeps CIS 4.2.13 satisfied (the
+          # control only requires a non-zero limit to prevent fork-bombs) while giving IMs
+          # ample headroom; still far below kernel.threads-max (~123729).
+          podPidsLimit: 32768
       notify: restart k3s
 
     - name: Ensure /etc/rancher/k3s/config.yaml loads the hardened kubelet config
