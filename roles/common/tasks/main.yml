@@ -29,3 +29,21 @@
     daemon_reload: true
   when: fstab_swap is changed
   become: true
+
+# K8s node kernel sysctls. controller-runtime (Longhorn, chaos-mesh, many operators) opens one
+# inotify instance per watch; the kernel default (128) is exhausted on a dense node, so a manager
+# crashes at startup with `unable to start manager {"error": "too many open files"}`. This was set
+# manually + inconsistently per node (drift — some at 512, star-kitten/swift-mac/loving-gannet left
+# at 128; chaos-controller-manager crashlooped on star-kitten after a reboot repacked pods onto it,
+# 2026-10-16). Codified here so every node is uniform + survives a re-provision.
+- name: Write k8s node sysctls (/etc/sysctl.d/99-k8s.conf)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-k8s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by minicloud-ansible (roles/common) — do not hand-edit.
+      fs.inotify.max_user_instances=512
+  become: true
+  notify: Reload sysctl
