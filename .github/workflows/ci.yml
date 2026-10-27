@@ -8,6 +8,7 @@ on:
       - "roles/**"
       - "inventory.yml"
       - "ansible.cfg"
+      - ".ansible-lint"
       - ".github/workflows/ci.yml"
   push:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - "roles/**"
       - "inventory.yml"
       - "ansible.cfg"
+      - ".ansible-lint"
       - ".github/workflows/ci.yml"
 
 permissions:
