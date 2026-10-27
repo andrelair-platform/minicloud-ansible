@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "playbooks/**"
+      - "roles/**"
+      - "inventory.yml"
+      - "ansible.cfg"
+      - ".ansible-lint"
+      - ".github/workflows/ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "playbooks/**"
+      - "roles/**"
+      - "inventory.yml"
+      - "ansible.cfg"
+      - ".ansible-lint"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Ansible validation tools
+        run: pip install "ansible-core>=2.18,<2.20" "ansible-lint>=25,<26"
+      - name: Ansible lint
+        run: ansible-lint playbooks/configure-k3s-oidc.yml roles/k3s-oidc
+      - name: Playbook syntax checks
+        run: |
+          ansible-playbook playbooks/configure-k3s-oidc.yml --syntax-check
+          ansible-playbook playbooks/site.yml --syntax-check
+          ansible-playbook playbooks/cilium-migration.yml --syntax-check

@@ -1,0 +1,5 @@
+---
+# Existing public role names use hyphens (for example, k3s-oidc). Renaming them
+# would break playbook references; keep all other lint rules enabled.
+skip_list:
+  - role-name

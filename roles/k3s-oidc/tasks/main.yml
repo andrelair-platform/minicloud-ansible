@@ -107,3 +107,37 @@
   delay: 10
   until: k3s_oidc_ready.rc == 0 and k3s_oidc_ready.stdout == 'ok'
   when: not ansible_check_mode
+
+- name: Check whether Gatekeeper admission is installed
+  ansible.builtin.command:
+    cmd: k3s kubectl get deployment gatekeeper-controller-manager -n gatekeeper-system
+  register: k3s_oidc_gatekeeper
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Wait for Gatekeeper admission recovery after a K3s restart
+  ansible.builtin.command:
+    cmd: >-
+      k3s kubectl rollout status deployment/gatekeeper-controller-manager
+      -n gatekeeper-system --timeout=180s
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - k3s_oidc_gatekeeper.rc == 0
+
+- name: Verify the Gatekeeper webhook has a ready endpoint
+  ansible.builtin.command:
+    cmd: >-
+      k3s kubectl get endpointslice
+      -n gatekeeper-system
+      -l kubernetes.io/service-name=gatekeeper-webhook-service
+      -o jsonpath={.items[0].endpoints[0].conditions.ready}
+  register: k3s_oidc_gatekeeper_endpoint
+  changed_when: false
+  retries: 18
+  delay: 10
+  until: k3s_oidc_gatekeeper_endpoint.stdout == 'true'
+  when:
+    - not ansible_check_mode
+    - k3s_oidc_gatekeeper.rc == 0
