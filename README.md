@@ -46,11 +46,13 @@ ansible/
   inventory.yml          # 6 nodes grouped: control_plane / workers / cluster
   playbooks/
     site.yml             # bootstrap: common + longhorn-prereq + k3s-registries + network
+    configure-k3s-oidc.yml # Authentik authentication for the K3s API server
     upgrade.yml          # Day-2: rolling apt upgrade with drain/uncordon
   roles/
     common/              # base utilities (htop vim curl jq net-tools traceroute rsync)
     longhorn-prereq/     # open-iscsi installed, iscsid enabled+started
     k3s-registries/      # /etc/rancher/k3s/registries.yaml (Harbor mirror)
+    k3s-oidc/            # Authentik OIDC arguments for the K3s API server
     network/             # /etc/netplan/99-default-gateway.yaml (default route)
 ```
 
@@ -104,6 +106,42 @@ ansible-playbook playbooks/site.yml --diff
 
 Second run must report `changed=0`. Anything else means a task isn't
 idempotent and should be fixed.
+
+---
+
+## Kubernetes API OIDC authentication
+
+The `k3s-oidc` role configures the K3s API server to trust the Authentik
+`kubernetes` provider. It validates the Minicloud CA, OIDC discovery metadata,
+issuer, and required claims before adding a managed `kube-apiserver-arg` block.
+
+The focused playbook restarts the single K3s control plane when its managed
+configuration changes. Run it during an approved maintenance window:
+
+```bash
+# Preview only
+ansible-playbook playbooks/configure-k3s-oidc.yml --check --diff --limit set-hog
+
+# Apply and wait for API readiness
+ansible-playbook playbooks/configure-k3s-oidc.yml --diff --limit set-hog
+
+# Validate normal user authentication and authorization from the Mac
+kubectl --context minicloud-oidc auth whoami
+kubectl --context minicloud-oidc auth can-i '*' '*' --all-namespaces
+```
+
+To remove the managed API-server arguments and restart K3s:
+
+```bash
+ansible-playbook playbooks/configure-k3s-oidc.yml \
+  -e k3s_oidc_state=absent \
+  --diff \
+  --limit set-hog
+```
+
+The role backs up `config.yaml` before a change. RBAC subjects remain owned by
+`minicloud-gitops/platform/security/rbac/`; this role configures authentication,
+not authorization.
 
 ---
 

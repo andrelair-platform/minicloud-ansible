@@ -125,6 +125,14 @@
           etcd-snapshot-schedule-cron: "0 */6 * * *"
           etcd-snapshot-retention: 10
           etcd-snapshot-dir: /var/lib/rancher/k3s/server/db/snapshots
+          kube-apiserver-arg:
+            - "oidc-issuer-url=https://auth.10.0.0.200.nip.io/application/o/kubernetes/"
+            - "oidc-client-id=kubernetes"
+            - "oidc-ca-file=/etc/rancher/k3s/minicloud-ca.crt"
+            - "oidc-username-claim=preferred_username"
+            - "oidc-username-prefix=oidc:"
+            - "oidc-groups-claim=groups"
+            - "oidc-groups-prefix=oidc:"
 
     - name: Restart k3s server (control plane)
       ansible.builtin.systemd:
