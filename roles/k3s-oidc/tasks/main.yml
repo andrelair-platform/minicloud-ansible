@@ -1,0 +1,109 @@
+---
+- name: Validate requested OIDC state
+  ansible.builtin.assert:
+    that:
+      - k3s_oidc_state in ['present', 'absent']
+    fail_msg: "k3s_oidc_state must be 'present' or 'absent'"
+
+- name: Check K3s server configuration
+  ansible.builtin.stat:
+    path: "{{ k3s_oidc_config_path }}"
+  register: k3s_oidc_config
+
+- name: Require an existing K3s server configuration
+  ansible.builtin.assert:
+    that:
+      - k3s_oidc_config.stat.exists
+      - k3s_oidc_config.stat.isreg
+    fail_msg: "K3s server config {{ k3s_oidc_config_path }} is missing"
+
+- name: Check Minicloud CA certificate
+  ansible.builtin.stat:
+    path: "{{ k3s_oidc_ca_file }}"
+  register: k3s_oidc_ca
+  when: k3s_oidc_state == 'present'
+
+- name: Require the Minicloud CA certificate
+  ansible.builtin.assert:
+    that:
+      - k3s_oidc_ca.stat.exists
+      - k3s_oidc_ca.stat.isreg
+    fail_msg: "OIDC CA file {{ k3s_oidc_ca_file }} is missing"
+  when: k3s_oidc_state == 'present'
+
+- name: Read Authentik OIDC discovery metadata
+  ansible.builtin.uri:
+    url: "{{ k3s_oidc_issuer_url }}.well-known/openid-configuration"
+    ca_path: "{{ k3s_oidc_ca_file }}"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: k3s_oidc_discovery
+  changed_when: false
+  check_mode: false
+  when: k3s_oidc_state == 'present'
+
+- name: Require an exact OIDC issuer match
+  ansible.builtin.assert:
+    that:
+      - k3s_oidc_discovery.json.issuer == k3s_oidc_issuer_url
+      - k3s_oidc_discovery.json.jwks_uri is defined
+      - k3s_oidc_username_claim in k3s_oidc_discovery.json.claims_supported
+      - k3s_oidc_groups_claim in k3s_oidc_discovery.json.claims_supported
+    fail_msg: "Authentik discovery metadata does not match the intended K3s OIDC configuration"
+  when: k3s_oidc_state == 'present'
+
+- name: Read current K3s server configuration
+  ansible.builtin.slurp:
+    src: "{{ k3s_oidc_config_path }}"
+  register: k3s_oidc_config_raw
+
+- name: Refuse to create a duplicate unmanaged kube-apiserver argument list
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (k3s_oidc_config_raw.content | b64decode |
+        regex_search('(?m)^kube-apiserver-arg:')) or
+        ('# BEGIN ANSIBLE MANAGED K3S OIDC' in
+        (k3s_oidc_config_raw.content | b64decode))
+    fail_msg: >-
+      An unmanaged kube-apiserver-arg key already exists in {{ k3s_oidc_config_path }}.
+      Merge the OIDC arguments into that list instead of creating a duplicate YAML key.
+  when: k3s_oidc_state == 'present'
+
+- name: Manage K3s API-server OIDC arguments
+  ansible.builtin.blockinfile:
+    path: "{{ k3s_oidc_config_path }}"
+    marker: "# {mark} ANSIBLE MANAGED K3S OIDC"
+    block: |
+      kube-apiserver-arg:
+        - "oidc-issuer-url={{ k3s_oidc_issuer_url }}"
+        - "oidc-client-id={{ k3s_oidc_client_id }}"
+        - "oidc-ca-file={{ k3s_oidc_ca_file }}"
+        - "oidc-username-claim={{ k3s_oidc_username_claim }}"
+        - "oidc-username-prefix={{ k3s_oidc_username_prefix }}"
+        - "oidc-groups-claim={{ k3s_oidc_groups_claim }}"
+        - "oidc-groups-prefix={{ k3s_oidc_groups_prefix }}"
+    state: "{{ k3s_oidc_state }}"
+    backup: true
+  notify: restart k3s for oidc
+
+- name: Apply pending K3s restart before validation
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the Kubernetes API after OIDC configuration
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 6443
+    timeout: 180
+  when: not ansible_check_mode
+
+- name: Verify the Kubernetes API ready endpoint
+  ansible.builtin.command:
+    cmd: k3s kubectl get --raw=/readyz
+  register: k3s_oidc_ready
+  changed_when: false
+  retries: 18
+  delay: 10
+  until: k3s_oidc_ready.rc == 0 and k3s_oidc_ready.stdout == 'ok'
+  when: not ansible_check_mode

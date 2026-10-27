@@ -1,0 +1,6 @@
+---
+- name: Restart k3s after OIDC configuration change
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+  listen: restart k3s for oidc

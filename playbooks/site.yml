@@ -10,6 +10,8 @@
 
 - name: Control-plane customizations (k3s server node only)
   hosts: control_plane
+  become: true
   gather_facts: false
   roles:
     - coredns-ha
+    - k3s-oidc

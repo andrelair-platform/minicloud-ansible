@@ -1,0 +1,20 @@
+---
+# Configure the single K3s control plane to authenticate Authentik OIDC tokens.
+#
+# Safe preview:
+#   ansible-playbook playbooks/configure-k3s-oidc.yml --check --diff
+#
+# Apply (restarts the single K3s server after creating a config backup):
+#   ansible-playbook playbooks/configure-k3s-oidc.yml --diff
+#
+# Roll back the managed block and restart K3s:
+#   ansible-playbook playbooks/configure-k3s-oidc.yml \
+#     -e k3s_oidc_state=absent --diff
+
+- name: Configure Authentik OIDC authentication on the K3s API server
+  hosts: control_plane
+  serial: 1
+  become: true
+  gather_facts: false
+  roles:
+    - k3s-oidc
