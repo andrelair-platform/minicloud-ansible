@@ -1,0 +1,21 @@
+---
+# Apply ONLY the k3s-registries role (writes /etc/rancher/k3s/registries.yaml + the CA bundle it
+# references) and restart k3s (control plane) / k3s-agent (workers) on the targeted hosts.
+#
+# Used to cut a node over from the Harbor pull-through proxy to DIRECT ghcr.io/docker.io/quay.io pulls
+# (Harbor retirement) WITHOUT running the full site.yml (which would also re-apply common/longhorn-prereq/
+# network + the control-plane-customizations play on the server node).
+#
+# Scope with -l (limit). Examples:
+#   # cut set-hog (the k3s control plane) over — do this when the cluster is idle (restarts the API server):
+#   ansible-playbook playbooks/apply-registries.yml -l control_plane --ssh-common-args='-o ProxyJump=controller'
+#   # a single worker:
+#   ansible-playbook playbooks/apply-registries.yml -l loving-gannet --ssh-common-args='-o ProxyJump=controller'
+#
+# From the CONTROLLER (on the 10.0.0.0/24 LAN) drop the --ssh-common-args (no ProxyJump needed).
+- name: Apply k3s registries config (Harbor-proxy -> direct ghcr cutover)
+  hosts: cluster
+  become: true
+  gather_facts: true
+  roles:
+    - k3s-registries
