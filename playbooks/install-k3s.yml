@@ -40,6 +40,25 @@
     k3s_version: "v1.36.2+k3s1"
 
   tasks:
+    - name: Ensure the k3s config drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/rancher/k3s/config.yaml.d
+        state: directory
+        mode: "0755"
+
+    # Dedicate the control plane: keep it light (scheduling.md). Without a taint, k3s leaves the
+    # server node schedulable → it accreted 91 pods → an OOM-wedge of the apiserver (2026-11-17).
+    # The live taint was applied imperatively; this drop-in makes it SURVIVE A NODE REBUILD (a fresh
+    # k3s reads config.yaml.d/*.yaml at first start and applies the taint). No restart handler here —
+    # the live taint already exists, so we avoid a disruptive control-plane restart.
+    - name: Dedicate the control plane — node-taint drop-in (survives rebuild)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml.d/10-control-plane-taint.yaml
+        mode: "0644"
+        content: |
+          node-taint:
+            - "node-role.kubernetes.io/control-plane:NoSchedule"
+
     - name: Check if k3s is already installed
       ansible.builtin.stat:
         path: /usr/local/bin/k3s
