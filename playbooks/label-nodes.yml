@@ -1,0 +1,85 @@
+---
+# label-nodes.yml — codify hardware-capability node labels (survives a node rebuild).
+#
+# Currently labels: minicloud.io/cpu-avx2  — DuckDB (the data-platform S3-lake jobs) crashes with
+# "Illegal instruction (core dumped)" on a CPU without AVX2 (swift-mac, the 2012 MacBook; all 5 ThinkPads
+# have it). The data-platform DuckDB jobs REQUIRE this label via nodeAffinity
+# (minicloud-gitops platform/data/data-platform/06-lake-producer.yaml + 07-lake-transform.yaml), so a
+# DuckDB pod never schedules onto swift-mac. Self-detecting from /proc/cpuinfo — NO hardcoded hostnames,
+# so new/replaced hardware is classified correctly automatically.
+#
+# Two layers, mirroring the control-plane taint (install-k3s.yml):
+#   1. a k3s config.yaml.d drop-in  → applied by k3s at node (re)registration → SURVIVES A NODE REBUILD;
+#   2. a live `kubectl label`       → applies NOW, non-disruptively, without a k3s restart.
+#
+# Run AFTER install-k3s.yml (k3s must be up). Safe + idempotent to re-run.
+#   ansible-playbook playbooks/label-nodes.yml
+- name: Codify hardware-capability node labels
+  hosts: cluster
+  become: true
+  gather_facts: false
+
+  vars:
+    avx2_label_key: "minicloud.io/cpu-avx2"
+
+  tasks:
+    - name: Detect AVX2 support from /proc/cpuinfo
+      ansible.builtin.command: grep -qw avx2 /proc/cpuinfo
+      register: avx2_check
+      changed_when: false
+      failed_when: false
+
+    - name: Record AVX2 presence
+      ansible.builtin.set_fact:
+        has_avx2: "{{ avx2_check.rc == 0 }}"
+
+    - name: Ensure the k3s config drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/rancher/k3s/config.yaml.d
+        state: directory
+        mode: "0755"
+
+    # (1) Durable across a node rebuild — a fresh k3s reads config.yaml.d/*.yaml and applies node-label
+    # at registration. `node-label` is allowed for custom (non-kubernetes.io) label namespaces.
+    - name: Write the AVX2 node-label drop-in (nodes WITH AVX2)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml.d/20-node-labels.yaml
+        mode: "0644"
+        content: |
+          node-label:
+            - "{{ avx2_label_key }}=true"
+      when: has_avx2 | bool
+
+    - name: Remove the drop-in on nodes WITHOUT AVX2 (e.g. swift-mac)
+      ansible.builtin.file:
+        path: /etc/rancher/k3s/config.yaml.d/20-node-labels.yaml
+        state: absent
+      when: not (has_avx2 | bool)
+
+    # (2) Apply to the LIVE cluster now (idempotent) — labeling is non-disruptive (no evict, unlike a taint).
+    - name: Apply the AVX2 label live (nodes WITH AVX2)
+      ansible.builtin.command: >
+        k3s kubectl label node {{ inventory_hostname }} {{ avx2_label_key }}=true --overwrite
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      changed_when: true
+      when: has_avx2 | bool
+
+    - name: Remove the AVX2 label live (nodes WITHOUT AVX2)
+      ansible.builtin.command: >
+        k3s kubectl label node {{ inventory_hostname }} {{ avx2_label_key }}-
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      changed_when: true
+      failed_when: false
+      when: not (has_avx2 | bool)
+
+    - name: Show the capability label per node
+      ansible.builtin.command: k3s kubectl get nodes -L minicloud.io/cpu-avx2
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      run_once: true
+      changed_when: false
+      register: node_labels
+
+    - name: Print
+      ansible.builtin.debug:
+        msg: "{{ node_labels.stdout_lines }}"
+      run_once: true

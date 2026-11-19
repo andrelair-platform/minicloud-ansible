@@ -26,6 +26,10 @@
 #   1. Kubeconfig is fetched to /tmp/minicloud.yaml (patched server IP)
 #   2. Copy to controller:  scp /tmp/minicloud.yaml controller:~/.kube/minicloud.yaml
 #   3. Verify:              ssh controller "kubectl --kubeconfig ~/.kube/minicloud.yaml get nodes"
+#   4. Capability labels:   ansible-playbook playbooks/label-nodes.yml
+#                           (self-detecting AVX2 → minicloud.io/cpu-avx2; the data-platform DuckDB jobs
+#                            require it — a config drop-in makes it survive a node rebuild, same pattern
+#                            as the control-plane taint below)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Play 1 — Install k3s server on the control plane (set-hog)
