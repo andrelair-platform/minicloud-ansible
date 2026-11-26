@@ -1,27 +1,39 @@
 ---
-# Fix NVMe boot loop on ThinkPads running kernel 6.8.0-137.
+# Fix NVMe boot loop + PXE-first boot delay on ThinkPad cluster nodes.
 #
-# Two-part fix:
+# Three-part fix:
 #   1. GRUB_TIMEOUT=3 — gives the NVMe PCIe link 3 seconds to train after GRUB
 #      loads (GRUB_TIMEOUT_STYLE=hidden keeps the boot menu suppressed).
 #   2. Ubuntu UEFI boot entry — MAAS provisioning leaves only a generic NVMe0
 #      device entry in UEFI NVRAM. Booting that entry forces UEFI to enumerate
 #      the drive from scratch, which times out before the PCIe link trains.
-#      Creating a direct entry pointing to grubx64.efi bypasses enumeration.
-#      The entry is placed first in BootOrder automatically by efibootmgr.
+#      Creating a direct entry pointing to shimx64.efi (the Secure-Boot shim,
+#      matching the known-good entries already present on fast-skunk and
+#      loving-gannet) bypasses enumeration. efibootmgr prepends the new entry.
+#   3. Disk-first BootOrder — MAAS leaves `PXE BOOT` ahead of the disk in the
+#      UEFI BootOrder, so every boot tries the network first, gets no DHCP/PXE
+#      offer from the controller, prints `PXE-E16: No valid offer`, and waits
+#      ~10s before falling through to disk (worse: can hang if the controller is
+#      off). This moves the disk entry (the direct Ubuntu entry if present, else
+#      NVMe0) to the FRONT and keeps PXE as a lower fallback — so a node boots
+#      straight from its disk, controller up or not. Node IPs are static, so a
+#      disk-booted node rejoins the cluster over the L2 switch without MAAS.
+#      (Applied live 2026-11-26 on set-hog/fast-heron/star-kitten; codified here
+#      so a MAAS re-provision cannot silently put PXE back in front.)
 #
-# Apply to ThinkPads only — swift-mac uses macOS bootloader, not GRUB.
-# Idempotent: safe to re-run on nodes already fixed.
+# Apply to ThinkPads only — swift-mac uses the macOS bootloader, not GRUB/UEFI.
+# Idempotent: every task no-ops on a node already in the desired state.
 #
 # Usage:
 #   ansible-playbook -i inventory.yml playbooks/fix-grub-timeout.yml
-#   ansible-playbook -i inventory.yml playbooks/fix-grub-timeout.yml --limit new-node
+#   ansible-playbook -i inventory.yml playbooks/fix-grub-timeout.yml --limit set-hog
 - name: Fix NVMe boot on ThinkPad nodes (GRUB timeout + Ubuntu UEFI entry)
   hosts:
     - set-hog
     - fast-skunk
     - fast-heron
     - star-kitten
+    - loving-gannet
   gather_facts: true
   become: true
 
@@ -47,14 +59,63 @@
       register: efibootmgr_output
       changed_when: false
 
-    - name: Create Ubuntu UEFI boot entry pointing to grubx64.efi
+    - name: Create Ubuntu UEFI boot entry pointing to shimx64.efi
       ansible.builtin.command: >
         efibootmgr --create
         --disk /dev/nvme0n1
         --part 1
         --label 'Ubuntu'
-        --loader '\EFI\ubuntu\grubx64.efi'
+        --loader '\EFI\ubuntu\shimx64.efi'
       when: "'Ubuntu' not in efibootmgr_output.stdout"
+
+    # --- Part 3: enforce disk-first BootOrder (demote PXE below the disk) ---
+
+    - name: Re-read UEFI boot entries (the Ubuntu entry now exists on every node)
+      ansible.builtin.command: efibootmgr
+      register: efibootmgr_entries
+      changed_when: false
+
+    - name: Find the direct Ubuntu boot entry id (preferred target)
+      ansible.builtin.set_fact:
+        ubuntu_boot_id: >-
+          {{ efibootmgr_entries.stdout_lines
+             | select('search', 'Ubuntu')
+             | map('regex_replace', '^Boot([0-9A-Fa-f]{4}).*$', '\1')
+             | list | first | default('') }}
+
+    - name: Find the generic NVMe0 boot entry id (fallback target)
+      ansible.builtin.set_fact:
+        nvme0_boot_id: >-
+          {{ efibootmgr_entries.stdout_lines
+             | select('search', 'NVMe0')
+             | map('regex_replace', '^Boot([0-9A-Fa-f]{4}).*$', '\1')
+             | list | first | default('') }}
+
+    - name: Choose the disk boot entry (direct Ubuntu entry if present, else NVMe0)
+      ansible.builtin.set_fact:
+        disk_boot_id: "{{ ubuntu_boot_id if ubuntu_boot_id else nvme0_boot_id }}"
+
+    - name: Read the current UEFI BootOrder as a list
+      ansible.builtin.set_fact:
+        current_boot_order: >-
+          {{ ((efibootmgr_entries.stdout | regex_search('BootOrder:[^\n]*'))
+              | default('BootOrder:') | regex_replace('BootOrder:\s*', '')).split(',')
+             | reject('equalto', '') | list }}
+
+    - name: Compute the desired BootOrder (disk entry first, everything else unchanged)
+      ansible.builtin.set_fact:
+        desired_boot_order: >-
+          {{ ([disk_boot_id] + (current_boot_order | reject('equalto', disk_boot_id) | list))
+             | join(',') }}
+      when: disk_boot_id | length > 0
+
+    - name: Enforce disk-first BootOrder (survives a MAAS re-provision)
+      ansible.builtin.command: "efibootmgr -o {{ desired_boot_order }}"
+      changed_when: true
+      when:
+        - disk_boot_id | length > 0
+        - current_boot_order | length > 0
+        - current_boot_order | first != disk_boot_id
 
   handlers:
     - name: update-grub
