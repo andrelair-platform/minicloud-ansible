@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.2](https://github.com/andrelair-platform/minicloud-ansible/compare/minicloud-ansible-v0.1.1...minicloud-ansible-v0.1.2) (2026-11-26)
+
+
+### Features
+
+* **common:** disable swap on all nodes (k8s runs swapless) ([#20](https://github.com/andrelair-platform/minicloud-ansible/issues/20)) ([8ed2a89](https://github.com/andrelair-platform/minicloud-ansible/commit/8ed2a89edb3d1e31807fa9092011f9b6ba3c3b0b))
+* **coredns-ha:** re-assert CoreDNS replicas:2 in the k3s AddOn (durable) ([#21](https://github.com/andrelair-platform/minicloud-ansible/issues/21)) ([163918a](https://github.com/andrelair-platform/minicloud-ansible/commit/163918a935f4f2e81595ab3034eaebf3ae06b7ee))
+* **dr:** scripted control-plane restore + drill playbook (Stage 0 / R-02) ([085b08e](https://github.com/andrelair-platform/minicloud-ansible/commit/085b08ea5ac4ba18d771b39e271e0c8fe00a2e59))
+* **k3s:** retire the Harbor pull-through proxy — pull upstreams directly ([#27](https://github.com/andrelair-platform/minicloud-ansible/issues/27)) ([6cbe46c](https://github.com/andrelair-platform/minicloud-ansible/commit/6cbe46c922fce13c5fed8a8d0296094a9194f3e0))
+* **nodes:** codify AVX2 capability label (survives node rebuild) ([#30](https://github.com/andrelair-platform/minicloud-ansible/issues/30)) ([a984fcb](https://github.com/andrelair-platform/minicloud-ansible/commit/a984fcb6929092265fe12debbb6473a05ead2590))
+
+
+### Bug Fixes
+
+* **boot:** force disk-first UEFI BootOrder on ThinkPad nodes (kill PXE-E16 delay) ([#31](https://github.com/andrelair-platform/minicloud-ansible/issues/31)) ([deab1af](https://github.com/andrelair-platform/minicloud-ansible/commit/deab1aff519d9fb07c164a9ca6958f47f73026f9))
+* **cis:** raise kubelet podPidsLimit 1024 → 32768 (Longhorn IM fork headroom) ([#23](https://github.com/andrelair-platform/minicloud-ansible/issues/23)) ([b0084dc](https://github.com/andrelair-platform/minicloud-ansible/commit/b0084dc2982cf6b62aef1a7749364882acf1da67))
+* **common:** codify fs.inotify.max_user_instances=512 on all nodes ([#24](https://github.com/andrelair-platform/minicloud-ansible/issues/24)) ([9127eec](https://github.com/andrelair-platform/minicloud-ansible/commit/9127eec338c22e9b9ef3fd772a57a26be8121dae))
+* **inventory:** add loving-gannet (10.0.0.9) to workers ([#16](https://github.com/andrelair-platform/minicloud-ansible/issues/16)) ([cbfa31b](https://github.com/andrelair-platform/minicloud-ansible/commit/cbfa31b122e18964ffe6385ef38d67af0c73a46a))
+* **k3s:** bake the control-plane NoSchedule taint into the control-plane node config ([#29](https://github.com/andrelair-platform/minicloud-ansible/issues/29)) ([b38b9a0](https://github.com/andrelair-platform/minicloud-ansible/commit/b38b9a0a207bc1dd4ef4178031a8b40484123af5))
+* **k3s:** configure authentik oidc authentication ([#25](https://github.com/andrelair-platform/minicloud-ansible/issues/25)) ([c5be721](https://github.com/andrelair-platform/minicloud-ansible/commit/c5be721536e85859f3b452bc38c15d37e33b15ea))
+* **longhorn-prereq:** blacklist Longhorn iSCSI devices from multipathd ([#17](https://github.com/andrelair-platform/minicloud-ansible/issues/17)) ([063fbc1](https://github.com/andrelair-platform/minicloud-ansible/commit/063fbc1669c2e59bf1651173072d81d9912a4c78))
+* **longhorn-prereq:** make multipathd handler notifiable (unbreaks site.yml) ([#22](https://github.com/andrelair-platform/minicloud-ansible/issues/22)) ([0f5649a](https://github.com/andrelair-platform/minicloud-ansible/commit/0f5649a0fbf0d5b99d19c17bcae6e5b0bd9cf6ea))
+* **website:** correct sidebars.ts brace syntax ([4ff62c8](https://github.com/andrelair-platform/minicloud-ansible/commit/4ff62c843be88e940dc6215d8535562fa5513db3))
+
 ## [0.1.1](https://github.com/andrelair-platform/minicloud-ansible/compare/minicloud-ansible-v0.1.0...minicloud-ansible-v0.1.1) (2026-08-14)
 
 
